@@ -113,6 +113,36 @@ describe("parseAIConfig", () => {
     expect(error.message).toContain(name);
   });
 
+  it("rejects URLs with credentials without echoing them", () => {
+    const error = failure({
+      ...valid,
+      AI_BASE_URL: "https://user:hunter2@ai.test.invalid/v1",
+    });
+    expect(error.code).toBe("config");
+    expect(error.message).toContain("AI_BASE_URL");
+    expect(error.message).not.toContain("hunter2");
+    expect(error.message).not.toContain("ai.test.invalid");
+  });
+
+  it("accepts the upper bounds for timeout and retries", () => {
+    expect(
+      parseAIConfig({
+        ...valid,
+        AI_TIMEOUT_MS: "120000",
+        AI_MAX_RETRIES: "3",
+      }),
+    ).toMatchObject({ timeoutMs: 120000, maxRetries: 3 });
+  });
+
+  it.each([
+    ["AI_TIMEOUT_MS", "120001"],
+    ["AI_MAX_RETRIES", "4"],
+  ])("rejects %s=%s above the cap", (name, value) => {
+    const error = failure({ ...valid, [name]: value });
+    expect(error.code).toBe("config");
+    expect(error.message).toContain(name);
+  });
+
   it("never puts the API key in an error message", () => {
     const envs = [
       { ...valid, AI_BASE_URL: "http://ai.test.invalid" },

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AIConfig } from "./config";
+import type { AIConfig, StructuredMode } from "./config";
 import {
   AIProviderError,
   type AIProvider,
@@ -28,10 +28,10 @@ const chatCompletion = z.object({
     .min(1),
   usage: z
     .object({
-      prompt_tokens: z.number().optional(),
-      completion_tokens: z.number().optional(),
+      prompt_tokens: z.number().nullish(),
+      completion_tokens: z.number().nullish(),
     })
-    .optional(),
+    .nullish(),
 });
 
 const defaultSleep = (ms: number) =>
@@ -44,7 +44,10 @@ function isTimeout(error: unknown): boolean {
   );
 }
 
-function statusError(status: number): AIProviderError {
+function statusError(
+  status: number,
+  mode: StructuredMode | undefined,
+): AIProviderError {
   if (status === 401 || status === 403) {
     return new AIProviderError(
       "auth",
@@ -63,6 +66,21 @@ function statusError(status: number): AIProviderError {
       { retryable: true },
     );
   }
+  if (status === 404) {
+    return new AIProviderError(
+      "config",
+      "AI provider returned HTTP 404: check that AI_BASE_URL is correct and usually ends with /v1",
+    );
+  }
+  if (
+    (status === 400 || status === 422) &&
+    (mode === "json_schema" || mode === "json_object")
+  ) {
+    return new AIProviderError(
+      "bad_response",
+      `AI provider rejected the request (HTTP ${status}): the server may not support response_format, try AI_STRUCTURED_MODE=json_object or prompt`,
+    );
+  }
   return new AIProviderError(
     "bad_response",
     `AI provider returned unexpected HTTP ${status}`,
@@ -71,7 +89,7 @@ function statusError(status: number): AIProviderError {
 
 // Models in `prompt` mode often wrap JSON in a markdown fence.
 function stripFence(text: string): string {
-  const match = /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/.exec(text);
+  const match = /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/i.exec(text);
   return match?.[1] ?? text;
 }
 
@@ -87,7 +105,10 @@ export function createOpenAICompatibleProvider(
   const backoffBaseMs = deps.backoffBaseMs ?? BACKOFF_BASE_MS;
   const endpoint = `${config.baseUrl.replace(/\/+$/, "")}/chat/completions`;
 
-  async function attempt(body: Record<string, unknown>) {
+  async function attempt(
+    body: Record<string, unknown>,
+    mode: StructuredMode | undefined,
+  ) {
     let response: Response;
     try {
       response = await fetch(endpoint, {
@@ -111,7 +132,7 @@ export function createOpenAICompatibleProvider(
         retryable: true,
       });
     }
-    if (!response.ok) throw statusError(response.status);
+    if (!response.ok) throw statusError(response.status, mode);
 
     let json: unknown;
     try {
@@ -140,24 +161,26 @@ export function createOpenAICompatibleProvider(
     const content = choices.at(0)?.message.content ?? "";
     return {
       content,
-      usage:
-        usage === undefined
-          ? undefined
-          : {
-              ...(usage.prompt_tokens !== undefined && {
-                inputTokens: usage.prompt_tokens,
-              }),
-              ...(usage.completion_tokens !== undefined && {
-                outputTokens: usage.completion_tokens,
-              }),
-            },
+      usage: usage
+        ? {
+            ...(typeof usage.prompt_tokens === "number" && {
+              inputTokens: usage.prompt_tokens,
+            }),
+            ...(typeof usage.completion_tokens === "number" && {
+              outputTokens: usage.completion_tokens,
+            }),
+          }
+        : undefined,
     };
   }
 
-  async function complete(body: Record<string, unknown>) {
+  async function complete(
+    body: Record<string, unknown>,
+    mode?: StructuredMode,
+  ) {
     for (let n = 0; ; n++) {
       try {
-        return await attempt(body);
+        return await attempt(body, mode);
       } catch (error) {
         const canRetry =
           error instanceof AIProviderError &&
@@ -206,19 +229,22 @@ export function createOpenAICompatibleProvider(
               .filter(Boolean)
               .join("\n\n");
 
-      const result = await complete({
-        model: config.model,
-        messages: toMessages(input.prompt, system),
-        ...(mode === "json_schema" && {
-          response_format: {
-            type: "json_schema",
-            json_schema: { name: input.schemaName, schema: jsonSchema },
-          },
-        }),
-        ...(mode === "json_object" && {
-          response_format: { type: "json_object" },
-        }),
-      });
+      const result = await complete(
+        {
+          model: config.model,
+          messages: toMessages(input.prompt, system),
+          ...(mode === "json_schema" && {
+            response_format: {
+              type: "json_schema",
+              json_schema: { name: input.schemaName, schema: jsonSchema },
+            },
+          }),
+          ...(mode === "json_object" && {
+            response_format: { type: "json_object" },
+          }),
+        },
+        mode,
+      );
 
       let raw: unknown;
       try {

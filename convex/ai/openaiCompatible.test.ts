@@ -214,7 +214,7 @@ describe("openai-compatible provider", () => {
 
   it("exposes only the host and model via getProviderInfo", () => {
     const { provider } = setup({
-      baseUrl: "https://user:pw@llm.example.com:8443/v1",
+      baseUrl: "https://llm.example.com:8443/v1",
     });
     const info = provider.getProviderInfo();
     expect(info).toEqual({
@@ -223,7 +223,69 @@ describe("openai-compatible provider", () => {
       baseUrlHost: "llm.example.com:8443",
     });
     expect(JSON.stringify(info)).not.toContain(KEY);
-    expect(JSON.stringify(info)).not.toContain("pw");
+  });
+
+  it("tolerates null usage and null token counts", async () => {
+    const { provider } = setup(
+      {},
+      jsonResponse({ ...completion("a"), usage: null }),
+      jsonResponse(
+        completion("b", { prompt_tokens: null, completion_tokens: 4 }),
+      ),
+    );
+    const first = await provider.generateText({ prompt: "x" });
+    expect(first.text).toBe("a");
+    expect(first).not.toHaveProperty("usage");
+    const second = await provider.generateText({ prompt: "x" });
+    expect(second.usage).toEqual({ outputTokens: 4 });
+  });
+
+  it("maps 404 to a non-retryable config error hinting at /v1", async () => {
+    const { provider, fetchMock } = setup({}, jsonResponse({}, 404));
+    const error = await failure(provider.generateText({ prompt: "x" }));
+    expect(error.code).toBe("config");
+    expect(error.retryable).toBe(false);
+    expect(error.message).toContain("/v1");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([400, 422])(
+    "hints at AI_STRUCTURED_MODE on HTTP %i in json_schema mode",
+    async (status) => {
+      const { provider, fetchMock } = setup(
+        { structuredMode: "json_schema" },
+        jsonResponse({}, status),
+      );
+      const error = await failure(
+        provider.generateStructuredOutput({
+          prompt: "x",
+          schema: notesSummary,
+          schemaName: "notesSummary",
+        }),
+      );
+      expect(error.code).toBe("bad_response");
+      expect(error.retryable).toBe(false);
+      expect(error.message).toContain("AI_STRUCTURED_MODE");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("gives no structured-mode hint on HTTP 400 for plain text or prompt mode", async () => {
+    const text = setup({}, jsonResponse({}, 400));
+    const textError = await failure(
+      text.provider.generateText({ prompt: "x" }),
+    );
+    expect(textError.message).not.toContain("AI_STRUCTURED_MODE");
+
+    const prompt = setup({ structuredMode: "prompt" }, jsonResponse({}, 400));
+    const promptError = await failure(
+      prompt.provider.generateStructuredOutput({
+        prompt: "x",
+        schema: notesSummary,
+        schemaName: "notesSummary",
+      }),
+    );
+    expect(promptError.message).not.toContain("AI_STRUCTURED_MODE");
   });
 });
 
@@ -274,7 +336,7 @@ describe("openai-compatible structured output", () => {
   it("prompt mode sends no response_format and tolerates a code fence", async () => {
     const { provider, fetchMock } = setup(
       { structuredMode: "prompt" },
-      jsonResponse(completion("```json\n" + JSON.stringify(good) + "\n```")),
+      jsonResponse(completion("```JSON\n" + JSON.stringify(good) + "\n```")),
     );
     const result = await provider.generateStructuredOutput({
       prompt: "Podsumuj",

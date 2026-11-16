@@ -20,27 +20,28 @@ const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1"]);
 const baseUrl = z.string().refine((value) => {
   try {
     const url = new URL(value);
+    if (url.username !== "" || url.password !== "") return false;
     if (url.protocol === "https:") return true;
     return url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname);
   } catch {
     return false;
   }
-}, "must be an https URL (http is allowed only for localhost or 127.0.0.1)");
+}, "must be an https URL without credentials (http is allowed only for localhost or 127.0.0.1)");
 
 const required = (name: string) =>
   z.string({ error: `${name} is required` }).min(1, `${name} is required`);
 
-const envNumber = (name: string, fallback: number, min: number) =>
+const envNumber = (name: string, fallback: number, min: number, max: number) =>
   z
     .string()
     .optional()
     .transform((value, ctx) => {
       if (value === undefined) return fallback;
       const parsed = Number(value);
-      if (!Number.isInteger(parsed) || parsed < min) {
+      if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
         ctx.addIssue({
           code: "custom",
-          message: `${name} must be an integer >= ${min}`,
+          message: `${name} must be an integer between ${min} and ${max}`,
         });
         return z.NEVER;
       }
@@ -54,8 +55,8 @@ const schema = z.discriminatedUnion("AI_PROVIDER", [
     AI_BASE_URL: baseUrl,
     AI_MODEL: required("AI_MODEL"),
     AI_API_KEY: required("AI_API_KEY"),
-    AI_TIMEOUT_MS: envNumber("AI_TIMEOUT_MS", 20000, 1),
-    AI_MAX_RETRIES: envNumber("AI_MAX_RETRIES", 1, 0),
+    AI_TIMEOUT_MS: envNumber("AI_TIMEOUT_MS", 20000, 1, 120000),
+    AI_MAX_RETRIES: envNumber("AI_MAX_RETRIES", 1, 0, 3),
     AI_STRUCTURED_MODE: z
       .enum(["json_schema", "json_object", "prompt"])
       .default("json_schema"),
