@@ -15,12 +15,15 @@
     "noUncheckedIndexedAccess": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    "allowJs": true,
+    "checkJs": true
   },
   "include": [
     "vite.config.ts",
     "vitest.config.ts",
     "playwright.config.ts",
-    "e2e"
+    "e2e",
+    "scripts/**/*"
   ]
 }
