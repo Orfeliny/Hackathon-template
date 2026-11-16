@@ -21,6 +21,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "codegen:check": "node scripts/codegen-check.mjs",
     "verify": "run-s format:check lint typecheck test:coverage build test:e2e"
   },
   "dependencies": {
