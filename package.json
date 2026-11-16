@@ -22,6 +22,9 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "seed": "convex run notes/seed:run",
+    "lane:new": "node scripts/lane.mjs new",
+    "lane:list": "node scripts/lane.mjs list",
+    "lane:rm": "node scripts/lane.mjs rm",
     "codegen:check": "node scripts/codegen-check.mjs",
     "verify": "run-s format:check lint typecheck test:coverage build test:e2e"
   },
