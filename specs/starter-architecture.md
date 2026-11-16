@@ -645,6 +645,9 @@ rare, visible early, and cheap to fix. Four layers, cheapest first.
   review), `convex/ai/**`, `convex/lib/**`, `src/app/**`, `src/components/ui/**`, `src/lib/**`,
   `package.json`, `package-lock.json`, root config files, `.github/**`, `.claude/**`, `CLAUDE.md`.
   The script, the CI job and `CLAUDE.md` all read or point to this one file.
+- **Derived files are exempt:** `convex/_generated/**` counts as neither hot nor non-hot. It is
+  regenerated output that rides along with whatever change produced it, so it never makes a PR
+  "mixed" on its own.
 - **Adding a dependency is a hot-file change** (`package.json` + lockfile): it goes in a contract
   PR, after vetting the package (exists in the registry under the expected name, OSI license,
   maintained, no known vulnerabilities) and a quick word with the team. Agents propose it and
@@ -658,8 +661,9 @@ work that needs it. Teammates rebase onto it. Agents must ask a human before edi
 inside a feature PR.
 
 Typical backend feature: PR 1 (contract) = `convex/<name>/tables.ts` + the import line in
-`convex/schema.ts`; PR 2 (feature) = queries/mutations/actions/tests and the frontend folder. Both
-pass `hot-files` without any acknowledgement.
+`convex/schema.ts` (plus regenerated `convex/_generated/**`, exempt per §14.2, and the contract's
+own tests); PR 2 (feature) = queries/mutations/actions/tests and the frontend folder. Both pass
+`hot-files` without any acknowledgement.
 
 Escape hatch for genuinely tiny mixed cases: the PR template checkbox
 "`- [x] Zmiana plików wspólnych uzgodniona z zespołem`". Ticking a box is an `edited` event,

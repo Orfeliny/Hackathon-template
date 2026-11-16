@@ -103,7 +103,7 @@ Files: `package.json`, `package-lock.json`, `vitest.config.ts`, `src/test/setup.
 
 ### 04-convex-notes-backend
 
-**Goal:** Convex configured with a `notes` table, `notes.list` query and `notes.add` mutation, tested with `convex-test`; `npm run dev` works.
+**Goal:** Convex configured with a `notes` table, `api.notes.queries.list` query and `api.notes.mutations.add` mutation, tested with `convex-test`; `npm run dev` works.
 **Deps:** 03 | **Model:** sonnet | **Creds:** repo owner runs `npx convex dev --once` once to log in and create the dev deployment (or the coder uses `--configure new --dev-deployment local` if it works without login).
 
 Files: `package.json`, `package-lock.json`, `convex/schema.ts`, `convex/notes/tables.ts`, `convex/notes/queries.ts`, `convex/notes/mutations.ts`, `convex/notes/notes.test.ts`, `convex/tsconfig.json`, `convex/_generated/*`, `tsconfig.json`, `vitest.config.ts`
@@ -336,6 +336,7 @@ Files: `package.json` (scripts `codegen:check` and, if it qualifies, `verify`), 
 Files: `scripts/overlap.mjs`, `scripts/lib/hot-files.mjs`, `scripts/overlap.test.ts`, `.github/hot-files.txt`, `package.json` (script `overlap` only)
 
 - [ ] `.github/hot-files.txt` contains the list from ARCH 14.2, including `convex/*/tables.ts`.
+- [ ] `scripts/lib/hot-files.mjs` classifies `convex/_generated/**` as exempt (neither hot nor non-hot, ARCH 14.2).
 - [ ] `scripts/lib/hot-files.mjs` loads the list and matches paths; uses Node's built-in `path.matchesGlob` if it is stable in Node 24, otherwise stop and report (a matcher library is a scope change).
 - [ ] Compares my changed files (branch vs `origin/main` + working tree, or `--paths <globs>`) with open PRs (`gh pr list --state open --json number,title,author,headRefName,files`) and other local worktrees; output grouped by file, hot files marked; exit 0, or 1 with `--strict` on a hot-file overlap.
 - [ ] Works offline or without `gh auth`: skips the PR part with a warning instead of failing.
@@ -351,7 +352,7 @@ Files: `.github/workflows/ci.yml`, `scripts/hot-files-check.mjs`, `scripts/hot-f
 - [ ] `hot-files` job (pull_request only) gets changed files from git (base...head), reads the **live** PR body with `gh pr view <n> --json body` (job `permissions: pull-requests: read`, `GH_TOKEN: ${{ github.token }}`), reuses `scripts/lib/hot-files.mjs`; fails only when hot and non-hot files are mixed and the acknowledgement checkbox is not ticked.
 - [ ] `gate` needs `[verify, secrets, hot-files]`; passes only if `verify` and `secrets` are `success` and `hot-files` is `success`, or `skipped` only when `github.event_name != 'pull_request'` (ARCH 10.1). No `edited` trigger is added.
 - [ ] Shown on a real PR (or documented as needing the remote): mixed PR fails, ticking the box + **Re-run failed jobs** turns `hot-files` and `gate` green.
-- [ ] Unit tests: only hot files, only feature files, mixed without ack, mixed with ack.
+- [ ] Unit tests: only hot files, only feature files, mixed without ack, mixed with ack, contract PR (`tables.ts` + `schema.ts` + `convex/_generated/**` + a contract test) passes without ack.
 - [ ] Job-level concurrency like the other ci.yml jobs; `actionlint` clean.
 
 ## Phase 6 - CI/CD hardening
