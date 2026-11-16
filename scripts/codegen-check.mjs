@@ -3,13 +3,12 @@
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { checkGenerated } from "./lib/codegen-check.mjs";
-
-const convexBin = join("node_modules", "convex", "bin", "main.js");
+import { CONVEX_BIN } from "./lib/proc.mjs";
 
 const result = checkGenerated({
   dir: join("convex", "_generated"),
   runCodegen: () =>
-    spawnSync(process.execPath, [convexBin, "codegen"], {
+    spawnSync(process.execPath, [CONVEX_BIN, "codegen"], {
       stdio: ["ignore", "inherit", "inherit"],
       // anonymous mode lets a clone with a local backend run without a login
       env: { CONVEX_AGENT_MODE: "anonymous", ...process.env },

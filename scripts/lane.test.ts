@@ -187,11 +187,21 @@ describe("lanes", () => {
     expect(() => findLane("nope", lanes)).toThrow(/Known lanes: 12-login/);
   });
 
-  it("derives the deletion command from CONVEX_DEPLOYMENT", () => {
+  it("points cloud lanes at the dashboard or expiry, never a CLI delete", () => {
     const [lane] = toLanes(parseWorktrees(PORCELAIN), readEnv);
-    expect(lane && deletionHint(lane)).toBe(
-      "npx convex deployment delete happy-fox-123",
-    );
+    const hint = lane ? deletionHint(lane) : "";
+    expect(hint).toMatch(/Convex dashboard/);
+    expect(hint).toMatch(/in 7 days/);
+    expect(hint).not.toMatch(/deployment delete/);
+  });
+
+  it("says local lanes are removed with the worktree", () => {
+    const [lane] = toLanes(parseWorktrees(PORCELAIN), () => ({
+      CONVEX_DEPLOYMENT: "local:happy-fox-123",
+    }));
+    const hint = lane ? deletionHint(lane).replaceAll("\\", "/") : "";
+    expect(hint).toContain("F:/work/app-12-login/.convex/local/default");
+    expect(hint).toMatch(/removed with the worktree/);
   });
 });
 
@@ -308,7 +318,8 @@ describe("laneRm", () => {
       },
     ]);
     expect(logs.join("\n")).toMatch(/NOT deleted/);
-    expect(logs.join("\n")).toMatch(/npx convex deployment delete/);
+    expect(logs.join("\n")).not.toMatch(/deployment delete/);
+    expect(logs.join("\n")).toMatch(/Convex dashboard/);
   });
 
   it("passes --force through and reports a failed removal", () => {

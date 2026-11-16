@@ -1,6 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
-import { parseEnv } from "node:util";
 import { defineConfig, devices } from "@playwright/test";
+import { resolvePorts } from "./scripts/lib/lane-env.mjs";
 
 if (process.env.VITE_CONVEX_URL) {
   throw new Error(
@@ -8,11 +7,7 @@ if (process.env.VITE_CONVEX_URL) {
   );
 }
 
-// Parsed instead of loadEnvFile so .env.local's VITE_CONVEX_URL never reaches process.env.
-const localEnv = existsSync(".env.local")
-  ? parseEnv(readFileSync(".env.local", "utf8"))
-  : {};
-const port = Number(process.env.PREVIEW_PORT ?? localEnv.PREVIEW_PORT ?? 4173);
+const { previewPort: port } = resolvePorts(process.cwd());
 const isCI = Boolean(process.env.CI);
 
 export default defineConfig({

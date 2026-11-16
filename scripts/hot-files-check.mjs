@@ -1,8 +1,8 @@
 // CI check for the contract-first rule: hot and normal files must not share a PR (ARCH 14.3).
-import { spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { classify, loadHotFiles } from "./lib/hot-files.mjs";
+import { runForOutput } from "./lib/proc.mjs";
 
 /** The PR template (task 24) must contain exactly this line. */
 export const ACK_TEXT = "Zmiana plików wspólnych uzgodniona z zespołem";
@@ -70,21 +70,6 @@ export function evaluate({ files, body, patterns }) {
   };
 }
 
-/**
- * @param {string} command @param {string[]} args
- * @returns {string}
- */
-function run(command, args) {
-  const result = spawnSync(command, args, {
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  if (result.error) throw result.error;
-  if (result.status !== 0)
-    throw new Error(result.stderr || `${command} exited ${result.status}`);
-  return result.stdout;
-}
-
 /** @param {NodeJS.ProcessEnv} env */
 export function main(env) {
   const { PR_NUMBER, BASE_SHA, HEAD_SHA } = env;
@@ -95,12 +80,12 @@ export function main(env) {
   const patterns = loadHotFiles(
     fileURLToPath(new URL("../.github/hot-files.txt", import.meta.url)),
   );
-  const files = run("git", diffArgs(BASE_SHA, HEAD_SHA))
+  const files = runForOutput("git", diffArgs(BASE_SHA, HEAD_SHA))
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line !== "");
   const body = JSON.parse(
-    run("gh", ["pr", "view", PR_NUMBER, "--json", "body"]),
+    runForOutput("gh", ["pr", "view", PR_NUMBER, "--json", "body"]),
   ).body;
   const result = evaluate({ files, body: body ?? "", patterns });
   (result.ok ? console.log : console.error)(result.message);

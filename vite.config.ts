@@ -1,13 +1,13 @@
-import { defineConfig, loadEnv } from "vite";
+import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { resolvePorts } from "./scripts/lib/lane-env.mjs";
 
-// Ports come from the worktree's env files (written by `npm run lane:new`); shell variables win.
-export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), ["PORT", "PREVIEW_PORT"]);
-  return {
-    plugins: [react(), tailwindcss()],
-    server: { port: Number(env.PORT ?? 5173), strictPort: true },
-    preview: { port: Number(env.PREVIEW_PORT ?? 4173), strictPort: true },
-  };
+// Ports come from the worktree's .env.local (written by `npm run lane:new`); shell variables win.
+const { port, previewPort } = resolvePorts(process.cwd());
+
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  server: { port, strictPort: true },
+  preview: { port: previewPort, strictPort: true },
 });

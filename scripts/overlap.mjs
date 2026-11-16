@@ -1,13 +1,15 @@
 // Shows who else touches the files I am changing: open PRs and other local worktrees (ARCH 14.2).
-import { spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseWorktrees } from "./lane.mjs";
 import { classify, loadHotFiles, matchesGlobPath } from "./lib/hot-files.mjs";
+import { runForOutput } from "./lib/proc.mjs";
 
 const BASE = "origin/main";
-const HOT_FILES = ".github/hot-files.txt";
+const HOT_FILES = fileURLToPath(
+  new URL("../.github/hot-files.txt", import.meta.url),
+);
 const USAGE = `Usage: npm run overlap -- [--paths <glob>...] [--strict]`;
 
 /**
@@ -236,17 +238,7 @@ function realDeps() {
   return {
     cwd: process.cwd(),
     patterns: loadHotFiles(HOT_FILES),
-    output: (command, args, cwd) => {
-      const result = spawnSync(command, args, {
-        cwd,
-        encoding: "utf8",
-        maxBuffer: 64 * 1024 * 1024,
-      });
-      if (result.error) throw result.error;
-      if (result.status !== 0)
-        throw new Error(result.stderr || `${command} exited ${result.status}`);
-      return result.stdout;
-    },
+    output: runForOutput,
     log: (message) => console.log(message),
     warn: (message) => console.warn(`warning: ${message}`),
   };
