@@ -1,12 +1,23 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
+vi.mock("convex/react", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("convex/react")>()),
+  useQuery: () => [],
+}));
+
 describe("App", () => {
-  it("renders the homepage heading", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("renders the homepage heading offline", () => {
+    vi.stubEnv("VITE_CONVEX_URL", "");
     render(<App />);
     expect(
       screen.getByRole("heading", { level: 1, name: "HackNation Starter" }),
     ).toBeInTheDocument();
+    expect(screen.getByText(/Tryb offline/)).toBeInTheDocument();
   });
 });
