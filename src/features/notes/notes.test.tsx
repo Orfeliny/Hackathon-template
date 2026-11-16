@@ -6,10 +6,12 @@ import { noteFormSchema } from "./schema";
 
 const useQueryMock = vi.hoisted(() => vi.fn());
 const addMock = vi.hoisted(() => vi.fn());
+const summarizeMock = vi.hoisted(() => vi.fn());
 vi.mock("convex/react", async (importOriginal) => ({
   ...(await importOriginal<typeof import("convex/react")>()),
   useQuery: useQueryMock,
   useMutation: () => addMock,
+  useAction: () => summarizeMock,
 }));
 
 describe("notes schema", () => {
@@ -27,6 +29,77 @@ describe("NotesPage", () => {
     vi.unstubAllEnvs();
     useQueryMock.mockReset();
     addMock.mockReset();
+    summarizeMock.mockReset();
+  });
+
+  const online = () => {
+    vi.stubEnv("VITE_CONVEX_URL", "https://example.convex.cloud");
+    useQueryMock.mockReturnValue([]);
+  };
+  const clickSummarize = () =>
+    userEvent.click(screen.getByRole("button", { name: "Podsumuj notatki" }));
+
+  it("shows the summary and key points on success", async () => {
+    online();
+    summarizeMock.mockResolvedValue({
+      ok: true,
+      data: { summary: "Krótko o planach", keyPoints: ["Punkt A", "Punkt B"] },
+      provider: "mock",
+    });
+    render(<NotesPage />);
+    await clickSummarize();
+    expect(await screen.findByText("Krótko o planach")).toBeInTheDocument();
+    expect(screen.getByText("Punkt A")).toBeInTheDocument();
+    expect(screen.getByText("Punkt B")).toBeInTheDocument();
+  });
+
+  it("shows the message on ok:false and keeps the page working", async () => {
+    online();
+    summarizeMock.mockResolvedValue({
+      ok: false,
+      code: "empty",
+      message: "Brak notatek do podsumowania.",
+    });
+    render(<NotesPage />);
+    await clickSummarize();
+    expect(
+      await screen.findByText("Brak notatek do podsumowania."),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Nowa notatka")).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Podsumuj notatki" }),
+    ).toBeEnabled();
+  });
+
+  it("shows a friendly message when the action throws", async () => {
+    online();
+    summarizeMock.mockRejectedValue(new Error("Server Error: secret"));
+    render(<NotesPage />);
+    await clickSummarize();
+    expect(await screen.findByText(/Nie udało się połączyć/)).toBeVisible();
+    expect(screen.queryByText(/secret/)).not.toBeInTheDocument();
+  });
+
+  it("is busy and disabled while loading", async () => {
+    online();
+    let resolve!: (v: unknown) => void;
+    summarizeMock.mockReturnValue(new Promise((r) => (resolve = r)));
+    render(<NotesPage />);
+    await clickSummarize();
+    const button = screen.getByRole("button", { name: "Podsumowuję…" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-busy", "true");
+    resolve({ ok: true, data: { summary: "Gotowe", keyPoints: [] } });
+    expect(await screen.findByText("Gotowe")).toBeInTheDocument();
+  });
+
+  it("disables summarize offline with an explanation", () => {
+    vi.stubEnv("VITE_CONVEX_URL", "");
+    render(<NotesPage />);
+    expect(
+      screen.getByRole("button", { name: "Podsumuj notatki" }),
+    ).toBeDisabled();
+    expect(screen.getByText(/podsumowanie wymaga backendu/)).toBeVisible();
   });
 
   it("shows a Polish validation error on empty submit", async () => {
