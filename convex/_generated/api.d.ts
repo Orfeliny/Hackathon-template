@@ -10,6 +10,7 @@
 
 import type * as notes_mutations from "../notes/mutations.js";
 import type * as notes_queries from "../notes/queries.js";
+import type * as notes_seed from "../notes/seed.js";
 import type * as notes_tables from "../notes/tables.js";
 
 import type {
@@ -21,6 +22,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   "notes/mutations": typeof notes_mutations;
   "notes/queries": typeof notes_queries;
+  "notes/seed": typeof notes_seed;
   "notes/tables": typeof notes_tables;
 }>;
 
