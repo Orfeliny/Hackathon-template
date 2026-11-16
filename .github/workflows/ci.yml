@@ -90,6 +90,7 @@ jobs:
         # A PR must not be able to weaken its own check. Files absent at base (the PR that
         # introduces the checker) keep the PR's copy.
         run: |
+          git cat-file -e "$BASE_SHA^{commit}" || { echo "base commit $BASE_SHA is not reachable" >&2; exit 1; }
           for f in scripts/hot-files-check.mjs scripts/lib/hot-files.mjs .github/hot-files.txt; do
             if git cat-file -e "$BASE_SHA:$f" 2>/dev/null; then
               git checkout "$BASE_SHA" -- "$f"
