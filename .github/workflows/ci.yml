@@ -37,8 +37,36 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  hot-files:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    concurrency:
+      group: ci-${{ github.event_name }}-${{ github.ref }}-hot-files
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - name: Check hot-file mix
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/hot-files-check.mjs
+
+  # The `secrets` job (task 18) is not in this file yet; add it to needs and to the checks below.
   gate:
-    needs: [verify]
+    needs: [verify, hot-files]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -48,10 +76,13 @@ jobs:
     steps:
       - name: Require every needed job to succeed
         env:
-          NEEDS: ${{ toJSON(needs) }}
+          VERIFY: ${{ needs.verify.result }}
+          HOT_FILES: ${{ needs.hot-files.result }}
+          EVENT: ${{ github.event_name }}
         run: |
-          echo "$NEEDS"
-          if echo "$NEEDS" | grep -q '"result": "\(failure\|cancelled\|skipped\)"'; then
-            echo "A required job did not succeed" >&2
-            exit 1
-          fi
+          echo "verify=$VERIFY hot-files=$HOT_FILES event=$EVENT"
+          [ "$VERIFY" = "success" ] || { echo "verify did not succeed" >&2; exit 1; }
+          if [ "$HOT_FILES" = "success" ]; then exit 0; fi
+          if [ "$HOT_FILES" = "skipped" ] && [ "$EVENT" != "pull_request" ]; then exit 0; fi
+          echo "hot-files did not succeed" >&2
+          exit 1
