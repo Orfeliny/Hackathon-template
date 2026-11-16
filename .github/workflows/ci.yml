@@ -75,9 +75,32 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: node scripts/hot-files-check.mjs
 
-  # The `secrets` job (task 18) is not in this file yet; add it to needs and to the checks below.
+  secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: ci-${{ github.event_name }}-${{ github.ref }}-secrets
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    env:
+      GITLEAKS_VERSION: 8.30.1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install gitleaks (checksum-verified)
+        run: |
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$archive" "$base/$archive"
+          curl -fsSL -o "$RUNNER_TEMP/checksums.txt" "$base/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          (cd "$RUNNER_TEMP" && grep " $archive\$" checksums.txt | sha256sum --check --strict -)
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" gitleaks
+      - name: Scan full history
+        run: '"$RUNNER_TEMP/gitleaks" git --redact --verbose .'
+
   gate:
-    needs: [verify, hot-files]
+    needs: [verify, secrets, hot-files]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -88,11 +111,13 @@ jobs:
       - name: Require every needed job to succeed
         env:
           VERIFY: ${{ needs.verify.result }}
+          SECRETS: ${{ needs.secrets.result }}
           HOT_FILES: ${{ needs.hot-files.result }}
           EVENT: ${{ github.event_name }}
         run: |
-          echo "verify=$VERIFY hot-files=$HOT_FILES event=$EVENT"
+          echo "verify=$VERIFY secrets=$SECRETS hot-files=$HOT_FILES event=$EVENT"
           [ "$VERIFY" = "success" ] || { echo "verify did not succeed" >&2; exit 1; }
+          [ "$SECRETS" = "success" ] || { echo "secrets did not succeed" >&2; exit 1; }
           if [ "$HOT_FILES" = "success" ]; then exit 0; fi
           if [ "$HOT_FILES" = "skipped" ] && [ "$EVENT" != "pull_request" ]; then exit 0; fi
           echo "hot-files did not succeed" >&2
