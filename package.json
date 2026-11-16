@@ -25,6 +25,7 @@
     "lane:new": "node scripts/lane.mjs new",
     "lane:list": "node scripts/lane.mjs list",
     "lane:rm": "node scripts/lane.mjs rm",
+    "overlap": "node scripts/overlap.mjs",
     "codegen:check": "node scripts/codegen-check.mjs",
     "verify": "run-s format:check lint typecheck test:coverage build test:e2e"
   },
