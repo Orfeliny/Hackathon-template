@@ -111,6 +111,31 @@ describe("notes.actions.summarize", () => {
     expect(JSON.stringify(result)).not.toContain("llm.example.com");
   });
 
+  it("logs unexpected non-provider errors server-side and keeps the user message fixed", async () => {
+    stubEnv(OPENAI_ENV);
+    const boom = new TypeError("internal boom");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        get ok(): boolean {
+          throw boom;
+        },
+      }),
+    );
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = await setup("notatka testowa");
+
+    const result = await t.action(api.notes.actions.summarize, {});
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.any(String), boom);
+    expect(result).toEqual({
+      ok: false,
+      code: "unavailable",
+      message: "AI niedostępne. Spróbuj ponownie za chwilę.",
+    });
+    errorSpy.mockRestore();
+  });
+
   it("returns a config error instead of crashing on invalid config", async () => {
     stubEnv({ AI_PROVIDER: "openai-compatible" });
     const t = await setup("notatka testowa");

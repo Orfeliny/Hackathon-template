@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
+import type { SummarizeResult } from "../../../convex/notes/actions";
 
 export type SummarizeOutcome =
-  | { ok: true; data: { summary: string; keyPoints: string[] } }
-  | { ok: false; message: string };
+  Extract<SummarizeResult, { ok: true }> | { ok: false; message: string };
 
 const NETWORK_ERROR = "Nie udało się połączyć z serwerem. Spróbuj ponownie.";
 

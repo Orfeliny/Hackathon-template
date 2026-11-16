@@ -52,6 +52,9 @@ export const summarize = action({
       });
       return { ok: true, data: result.data, provider: result.provider };
     } catch (error) {
+      if (!(error instanceof AIProviderError)) {
+        console.error("notes.summarize failed unexpectedly", error);
+      }
       return failure(
         error instanceof AIProviderError ? error.code : "unavailable",
       );
