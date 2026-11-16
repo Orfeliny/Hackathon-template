@@ -5,7 +5,7 @@ import { parseAIConfig } from "../ai/config";
 import { getProvider } from "../ai/index";
 import { AIProviderError, type AIProviderErrorCode } from "../ai/types";
 
-// convex/tsconfig.json has no Node types; the Convex runtime still provides process.env.
+// tsconfig.app.json typechecks this file via _generated/api.d.ts; Node types there would hide browser-only bugs in src/.
 declare const process: { env: Record<string, string | undefined> };
 
 const summarySchema = z.object({
