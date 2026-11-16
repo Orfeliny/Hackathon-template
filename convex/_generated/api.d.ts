@@ -9,6 +9,7 @@
  */
 
 import type * as ai_config from "../ai/config.js";
+import type * as ai_mock from "../ai/mock.js";
 import type * as ai_types from "../ai/types.js";
 import type * as notes_mutations from "../notes/mutations.js";
 import type * as notes_queries from "../notes/queries.js";
@@ -23,6 +24,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   "ai/config": typeof ai_config;
+  "ai/mock": typeof ai_mock;
   "ai/types": typeof ai_types;
   "notes/mutations": typeof notes_mutations;
   "notes/queries": typeof notes_queries;
