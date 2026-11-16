@@ -52,21 +52,13 @@ describe("hot-files-check", () => {
         "convex/schema.ts",
         "convex/_generated/api.d.ts",
         "convex/_generated/dataModel.d.ts",
-        "convex/lib/contract.test.ts",
+        "convex/notes/tables.test.ts",
+        "convex/schema.test.ts",
       ],
       body: "",
       patterns,
     });
     expect(r.ok).toBe(true);
-  });
-
-  it("counts a contract test outside any hot glob as a feature file", () => {
-    const r = evaluate({
-      files: ["convex/notes/tables.ts", "convex/schema.test.ts"],
-      body: "",
-      patterns,
-    });
-    expect(r.ok).toBe(false);
   });
 
   it("treats generated files alone as neither hot nor normal", () => {

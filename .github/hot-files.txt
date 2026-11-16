@@ -4,7 +4,9 @@
 # convex/_generated/** is exempt (neither hot nor non-hot) and handled in scripts/lib/hot-files.mjs.
 
 convex/schema.ts
+convex/schema.test.ts
 convex/*/tables.ts
+convex/*/tables.test.ts
 convex/ai/**
 convex/lib/**
 src/app/**
