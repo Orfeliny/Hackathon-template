@@ -19,6 +19,14 @@ export default defineConfig({
           setupFiles: ["src/test/setup.ts"],
         },
       },
+      {
+        test: {
+          name: "backend",
+          environment: "edge-runtime",
+          include: ["convex/**/*.test.ts"],
+          server: { deps: { inline: ["convex-test"] } },
+        },
+      },
     ],
   },
 });
