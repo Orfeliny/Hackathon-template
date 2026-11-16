@@ -45,10 +45,7 @@ export function NotesPage() {
       ) : (
         <>
           <NoteForm offline onSubmit={() => Promise.resolve()} />
-          <SummarizePanel
-            offline
-            onSummarize={() => Promise.resolve({ ok: false, message: "" })}
-          />
+          <SummarizePanel offline />
         </>
       )}
     </section>

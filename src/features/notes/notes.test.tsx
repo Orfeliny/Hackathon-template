@@ -87,10 +87,18 @@ describe("NotesPage", () => {
     render(<NotesPage />);
     await clickSummarize();
     const button = screen.getByRole("button", { name: "Podsumowuję…" });
-    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-disabled", "true");
     expect(button).toHaveAttribute("aria-busy", "true");
-    resolve({ ok: true, data: { summary: "Gotowe", keyPoints: [] } });
-    expect(await screen.findByText("Gotowe")).toBeInTheDocument();
+    expect(button).toHaveFocus();
+    await userEvent.click(button);
+    expect(summarizeMock).toHaveBeenCalledTimes(1);
+    resolve({ ok: true, data: { summary: "Wynik", keyPoints: [] } });
+    expect(await screen.findByText("Wynik")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Gotowe");
+    expect(screen.getByRole("status")).not.toHaveTextContent("Wynik");
+    expect(
+      screen.getByRole("button", { name: "Podsumuj notatki" }),
+    ).toHaveFocus();
   });
 
   it("disables summarize offline with an explanation", () => {
