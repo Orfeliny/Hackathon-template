@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { ACK_TEXT, evaluate, isAcknowledged } from "./hot-files-check.mjs";
-import { loadHotFiles } from "./lib/hot-files.mjs";
+import {
+  ACK_TEXT,
+  diffArgs,
+  evaluate,
+  isAcknowledged,
+} from "./hot-files-check.mjs";
+import { classify, loadHotFiles } from "./lib/hot-files.mjs";
 
 const patterns = loadHotFiles(".github/hot-files.txt");
 const ticked = `Intro\n\n- [x] ${ACK_TEXT}\n`;
@@ -69,6 +74,34 @@ describe("hot-files-check", () => {
     });
     expect(r.ok).toBe(true);
     expect(r.normal).toEqual([]);
+  });
+
+  it("counts a hot file renamed into a feature folder as mixed", () => {
+    expect(diffArgs("a", "b")).toContain("--no-renames");
+    const r = evaluate({
+      files: ["src/lib/util.ts", "src/features/x/util.ts"],
+      body: "",
+      patterns,
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  it("ignores a ticked line inside an HTML comment or a code fence", () => {
+    expect(isAcknowledged(`<!--\n- [x] ${ACK_TEXT}\n-->`)).toBe(false);
+    expect(isAcknowledged(`\`\`\`md\n- [x] ${ACK_TEXT}\n\`\`\``)).toBe(false);
+    expect(isAcknowledged(`~~~\n- [x] ${ACK_TEXT}\n~~~`)).toBe(false);
+    expect(isAcknowledged(`<!-- hint -->\n- [x] ${ACK_TEXT}`)).toBe(true);
+    expect(isAcknowledged(`\`\`\`\ncode\n\`\`\`\n- [x] ${ACK_TEXT}`)).toBe(
+      true,
+    );
+  });
+
+  it("treats the checker and its list as hot files", () => {
+    for (const file of [
+      "scripts/hot-files-check.mjs",
+      "scripts/lib/hot-files.mjs",
+    ])
+      expect(classify(file, patterns)).toBe("hot");
   });
 
   it("accepts CRLF bodies and * bullets, rejects other text", () => {

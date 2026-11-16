@@ -55,6 +55,17 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
+      - name: Use the base copy of the checker and the list
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        # A PR must not be able to weaken its own check. Files absent at base (the PR that
+        # introduces the checker) keep the PR's copy.
+        run: |
+          for f in scripts/hot-files-check.mjs scripts/lib/hot-files.mjs .github/hot-files.txt; do
+            if git cat-file -e "$BASE_SHA:$f" 2>/dev/null; then
+              git checkout "$BASE_SHA" -- "$f"
+            fi
+          done
       - name: Check hot-file mix
         env:
           GH_TOKEN: ${{ github.token }}

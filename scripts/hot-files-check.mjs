@@ -12,8 +12,28 @@ const ACK_PATTERN = new RegExp(
   "mu",
 );
 
+/** Comments and fenced blocks are not something the author ticked. */
+const stripInert = (/** @type {string} */ body) =>
+  body
+    .replaceAll("\r\n", "\n")
+    .replace(/<!--[\s\S]*?-->/gu, "")
+    .replace(/^[ \t]*(```|~~~)[^\n]*\n[\s\S]*?^[ \t]*\1[^\n]*$/gmu, "");
+
 /** @param {string} body */
-export const isAcknowledged = (body) => ACK_PATTERN.test(body);
+export const isAcknowledged = (body) => ACK_PATTERN.test(stripInert(body));
+
+/**
+ * Renames become delete + add, so moving a hot file out of a hot folder still counts as touching it.
+ * @param {string} base @param {string} head
+ */
+export const diffArgs = (base, head) => [
+  "-c",
+  "core.quotepath=off",
+  "diff",
+  "--name-only",
+  "--no-renames",
+  `${base}...${head}`,
+];
 
 /**
  * @param {{ files: string[], body: string, patterns: string[] }} input
@@ -75,13 +95,7 @@ export function main(env) {
   const patterns = loadHotFiles(
     fileURLToPath(new URL("../.github/hot-files.txt", import.meta.url)),
   );
-  const files = run("git", [
-    "-c",
-    "core.quotepath=off",
-    "diff",
-    "--name-only",
-    `${BASE_SHA}...${HEAD_SHA}`,
-  ])
+  const files = run("git", diffArgs(BASE_SHA, HEAD_SHA))
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line !== "");

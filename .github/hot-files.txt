@@ -15,6 +15,8 @@ src/lib/**
 package.json
 package-lock.json
 .github/**
+scripts/hot-files-check.mjs
+scripts/lib/hot-files.mjs
 .claude/**
 CLAUDE.md
 
