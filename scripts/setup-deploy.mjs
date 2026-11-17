@@ -90,9 +90,10 @@ export function rulesetTargetsMain(ruleset) {
   return matchesMain(include) && !matchesMain(exclude);
 }
 
-// vercel@65.16.0 prints `Project not found: <name>` or `Project "<name>" was not found ...` (agent mode: reason not_found).
+// vercel@65.16.0 `project inspect` throws ProjectNotFound: `Error: There is no project for "<name>"`,
+// or in non-interactive/agent mode JSON on stdout with `"reason": "project_not_found"`.
 const PROJECT_NOT_FOUND =
-  /project not found|was not found|"reason":\s*"not_found"/i;
+  /There is no project for|"reason":\s*"project_not_found"/;
 
 /** @param {string} stdout @returns {string | null} project id from `vercel project inspect --json` */
 function inspectedProjectId(stdout) {

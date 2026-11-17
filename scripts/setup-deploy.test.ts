@@ -44,7 +44,22 @@ interface World {
   vercelProjectId?: string;
   tokenError?: string;
   inspectError?: string;
+  agentNotFound?: boolean;
 }
+
+const AGENT_NOT_FOUND: Result = {
+  status: 1,
+  stdout: `${JSON.stringify(
+    {
+      status: "error",
+      reason: "project_not_found",
+      message: 'There is no project for "my-hack"',
+    },
+    null,
+    2,
+  )}\n`,
+  stderr: "",
+};
 
 function setup(world: World = {}, argv: string[] = ["--yes"]) {
   const calls: Call[] = [];
@@ -126,7 +141,9 @@ function setup(world: World = {}, argv: string[] = ["--yes"]) {
       return world.inspectError
         ? bad(world.inspectError)
         : world.vercelProjectExists === false && !projectCreated
-          ? bad("Error: Project not found: my-hack")
+          ? world.agentNotFound
+            ? AGENT_NOT_FOUND
+            : bad('Error: There is no project for "my-hack"')
           : ok(JSON.stringify({ id: world.vercelProjectId ?? "prj_1" }));
     if (command === "npx" && line.includes(" link ")) {
       files[key(".vercel/project.json")] ??= PROJECT_JSON;
@@ -502,6 +519,26 @@ describe("runSetup", () => {
     const link = names.findIndex((l) => l.includes(" link "));
     expect(create).toBeGreaterThan(-1);
     expect(link).toBeGreaterThan(create);
+
+    const agent = setup({ vercelProjectExists: false, agentNotFound: true });
+    expect(await agent.exec()).toBe(0);
+    expect(
+      agent.calls.some((c) =>
+        c.args.join(" ").includes("project create my-hack"),
+      ),
+    ).toBe(true);
+
+    for (const inspectError of [
+      "Error: fetch failed (ECONNRESET)",
+      '{\n  "status": "error",\n  "reason": "login_required"\n}',
+      "Error: Its team was not found.",
+    ]) {
+      const aborted = setup({ inspectError });
+      expect(await aborted.exec()).toBe(1);
+      expect(
+        aborted.calls.some((c) => c.args.join(" ").includes("project create")),
+      ).toBe(false);
+    }
 
     const present = setup();
     await present.exec();
