@@ -54,7 +54,7 @@ Utwórz środowisko `production` (Settings > Environments) i dodaj w nim cztery 
 | `VERCEL_ORG_ID`     | `.vercel/project.json` po `vercel link` | `orgId`                 |
 | `VERCEL_PROJECT_ID` | `.vercel/project.json` po `vercel link` | `projectId`             |
 
-Opcjonalnie dojdzie piąty, `SENTRY_AUTH_TOKEN` (sekcja o Sentry niżej).
+Opcjonalnie dojdzie piąty, `SENTRY_AUTH_TOKEN`, oraz zmienne `SENTRY_ORG` i `SENTRY_PROJECT` (sekcja o Sentry niżej).
 
 Sekrety dodane do środowiska widzi tylko job z `environment: production`, czyli `deploy`. Gdy ustawisz je na poziomie repozytorium, też zadziałają. Środowisko pozwala dodać reguły ochronne (np. zatwierdzenie wdrożenia), ale patrz ograniczenia planów niżej.
 
@@ -99,13 +99,40 @@ Nie ustawiaj `VITE_CONVEX_URL` w Vercelu także tutaj.
 
 ## Sentry (opcjonalnie)
 
-Sentry **nie jest jeszcze podpięty w kodzie**. Pusta zmienna `VITE_SENTRY_DSN` oznacza, że Sentry nigdy się nie uruchomi, więc nic nie trzeba robić, jeśli zespół go nie chce. Jeśli zespół zdecyduje się go dodać, konfiguracja będzie wyglądać tak:
+Front ma wbudowaną, ale wyłączoną domyślnie obsługę Sentry (`@sentry/react`, kod w `src/lib/sentry.ts`). Bez `VITE_SENTRY_DSN` biblioteka nie jest nawet pobierana: ładuje się dynamicznym `import()` dopiero wtedy, gdy adres jest ustawiony, więc domyślna paczka się nie powiększa. Testy e2e i CI nie mają DSN-a i nie powinny go mieć.
 
-- `VITE_SENTRY_DSN`: publiczny adres projektu Sentry, ustawiany lokalnie w `.env.local` i w buildzie Vercel (to nie jest sekret, trafia do paczki frontu);
-- `SENTRY_AUTH_TOKEN`: sekret GitHuba, potrzebny wyłącznie do wysyłania map źródłowych podczas buildu; bez niego mapy nie są wysyłane;
-- po stronie backendu Convex ma własną integrację z Sentry w panelu (plan Pro), bez zmian w kodzie ([Convex: Exception reporting](https://docs.convex.dev/production/integrations/exception-reporting)).
+### Włączenie we froncie
 
-Ten opis zaktualizuje się, gdy integracja trafi do kodu.
+1. W Sentry utwórz projekt (platforma React) i skopiuj jego DSN.
+2. `VITE_SENTRY_DSN`: wpisz DSN lokalnie w `.env.local` albo, dla produkcji, w zmiennych projektu Vercel (środowisko Production). To nie jest sekret, trafia do paczki frontu. Pusta wartość wyłącza Sentry.
+3. Środowisko w Sentry to tryb Vite (`production` na Vercelu), a release to SHA commita: workflow `deploy.yml` ustawia `VITE_COMMIT_SHA` w kroku buildu.
+
+### Mapy źródłowe (opcjonalnie)
+
+Dzięki nim stack trace w Sentry pokazuje kod źródłowy zamiast zminifikowanego. Wtyczka `@sentry/vite-plugin` działa tylko wtedy, gdy podczas buildu jest ustawiony `SENTRY_AUTH_TOKEN`. Bez niego `vite.config.ts` zachowuje się dokładnie jak wcześniej.
+
+| Nazwa               | Rodzaj          | Wartość                                           |
+| ------------------- | --------------- | ------------------------------------------------- |
+| `SENTRY_AUTH_TOKEN` | sekret GitHuba  | token organizacji z uprawnieniem do wgrywania map |
+| `SENTRY_ORG`        | zmienna GitHuba | slug organizacji w Sentry                         |
+| `SENTRY_PROJECT`    | zmienna GitHuba | slug projektu w Sentry                            |
+
+Sekret dodajesz tam, gdzie pozostałe (sekcja 3), a zmienne w _Settings > Secrets and variables > Actions > Variables_. Token dostaje wyłącznie krok buildu w `deploy.yml`. Po wysłaniu pliki `*.map` są usuwane z `dist`, więc nie trafiają na Vercel i nikt ich nie pobierze z publicznego adresu.
+
+### Co jest wycinane przed wysyłką
+
+Hook `beforeSend` (i `beforeBreadcrumb`) usuwa z każdego zdarzenia:
+
+- ciała żądań i ciasteczka;
+- wartości pod kluczami pasującymi do `prompt`, `apiKey`, `token`, `authorization`, `password`, `secret`, `cookie`, `credential` oraz do `ai` jako osobnego członu nazwy (`ai`, `aiResponse`, `AI_API_KEY`; `email` czy `detail` zostają);
+- wartości takich parametrów w adresach URL i zapytaniach, także we fragmencie po `#`;
+- wszystkie breadcrumbs z konsoli, bo logi mogą zawierać prompty albo odpowiedzi modelu.
+
+Zasady są pokryte testami w `src/lib/sentry.test.ts`. Jeśli dodajesz do zdarzeń własne dane (`Sentry.setContext` i podobne), trzymaj je pod kluczami, które filtr rozpoznaje, albo rozszerz wyrażenie w `sentry.ts`.
+
+### Backend (Convex)
+
+Backend nie wymaga zmian w kodzie. Convex ma własną integrację z Sentry, ale **tylko w planie Pro**: w panelu otwórz _Deployment Settings > Integrations_, wybierz kartę Sentry i podaj DSN osobnego projektu Sentry z platformą **Node.js**. Convex dodaje do zdarzeń tagi `func`, `func_type`, `func_runtime`, `request_id`, `server_name` i `environment` ([Convex: Exception reporting](https://docs.convex.dev/production/integrations/exception-reporting)). Filtr z frontu tu nie działa, więc w akcjach AI nie wkładaj promptów do komunikatów błędów.
 
 ## Kontenery i GHCR (później)
 

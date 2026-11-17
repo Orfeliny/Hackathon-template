@@ -140,7 +140,7 @@ Pełna konfiguracja, w tym ochrona gałęzi `main`: [docs/deployment.md](docs/de
 
 ### Sentry (opcjonalnie)
 
-Monitoring błędów jest opcjonalny i na razie nie jest podpięty w kodzie. Zmienna `VITE_SENTRY_DSN` z `.env.example` pozostaje pusta, a pusta oznacza, że Sentry nigdy się nie uruchomi. Gdy zespół zdecyduje się go dodać, opis konfiguracji znajdzie się w [docs/deployment.md](docs/deployment.md).
+Monitoring błędów we froncie jest opcjonalny i domyślnie wyłączony. Zmienna `VITE_SENTRY_DSN` z `.env.example` jest pusta, a pusta oznacza, że Sentry nie jest ani pobierany, ani uruchamiany. Żeby go włączyć, wpisz DSN w `.env.local` (lokalnie) albo w zmiennych projektu Vercel (produkcja). Przed wysyłką z błędów znikają ciała żądań, tokeny, klucze i prompty AI. Mapy źródłowe wgrywa się tylko wtedy, gdy build ma `SENTRY_AUTH_TOKEN`. Backend Convex ma osobną integrację w panelu (plan Pro). Szczegóły, w tym lista wycinanych danych, są w [docs/deployment.md](docs/deployment.md).
 
 ## Problemy
 
