@@ -116,6 +116,35 @@ describe("scrubUrl", () => {
 });
 
 describe("scrubText", () => {
+  it.each([
+    [
+      "GET /api/notes?token=abc failed",
+      "GET /api/notes?token=[Filtered] failed",
+    ],
+    [
+      "request q=1&apiKey=sk-live-1 failed",
+      "request q=1&apiKey=[Filtered] failed",
+    ],
+    [
+      "fetch //cdn.test/x?access_token=t failed",
+      "fetch //cdn.test/x?access_token=[Filtered] failed",
+    ],
+    ["see /cb#id_token=xyz now", "see /cb#id_token=[Filtered] now"],
+    ["GET /api?page=2&sort=asc failed", "GET /api?page=2&sort=asc failed"],
+  ])("filters query pairs in prose: %s", (input, expected) => {
+    expect(scrubText(input)).toBe(expected);
+  });
+
+  it.each([
+    ["Bearer sk-abc123 rejected", "Bearer [Filtered] rejected"],
+    [
+      "Authorization header: Bearer xyz",
+      "Authorization header: Bearer [Filtered]",
+    ],
+  ])("filters bearer tokens: %s", (input, expected) => {
+    expect(scrubText(input)).toBe(expected);
+  });
+
   it("leaves harmless text alone", () => {
     expect(scrubText("Network request failed (status 500)")).toBe(
       "Network request failed (status 500)",

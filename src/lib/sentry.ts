@@ -30,13 +30,18 @@ function safeDecode(value: string): string {
   }
 }
 
-export function scrubUrl(url: string): string {
-  return url.replace(
-    /([?&;#])([^=&#;]*)=([^&#;]*)/g,
-    (match, sep: string, key: string) =>
-      isSensitiveKey(safeDecode(key)) ? `${sep}${key}=${FILTERED}` : match,
-  );
+function filterQueryPair(match: string, sep: string, key: string): string {
+  return isSensitiveKey(safeDecode(key)) ? `${sep}${key}=${FILTERED}` : match;
 }
+
+export function scrubUrl(url: string): string {
+  return url.replace(/([?&;#])([^=&#;]*)=([^&#;]*)/g, filterQueryPair);
+}
+
+// In prose a pair ends at whitespace, so the words after a URL survive.
+// Covers absolute, relative and //host URLs and bare "a=1&b=2" strings alike.
+const QUERY_PAIR_IN_TEXT = /([?&;#])([^=&#;\s]*)=([^&#;\s]*)/g;
+const BEARER = /\bBearer\s+\S+/gi;
 
 const SENSITIVE_ASSIGNMENT = new RegExp(
   `(?<![?&;#])\\b(\\w*(?:${SENSITIVE_WORD})\\w*)\\s*[:=]\\s*[^\\r\\n]*`,
@@ -49,7 +54,8 @@ export function scrubText(text: string): string {
   const valueLine = text.search(/\r?\n\s*Value:/);
   const head = valueLine === -1 ? text : text.slice(0, valueLine);
   const scrubbed = head
-    .replace(/https?:\/\/[^\s"'<>)]+/g, scrubUrl)
+    .replace(QUERY_PAIR_IN_TEXT, filterQueryPair)
+    .replace(BEARER, `Bearer ${FILTERED}`)
     .replace(SENSITIVE_ASSIGNMENT, `$1: ${FILTERED}`);
   return valueLine === -1 ? scrubbed : `${scrubbed}\n${FILTERED}`;
 }

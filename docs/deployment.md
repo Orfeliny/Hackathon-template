@@ -127,10 +127,11 @@ Sentry SDK 11 domyślnie zbiera prawie wszystko (dane użytkownika i jego adres 
 
 - ciała żądań i odpowiedzi oraz ciasteczka;
 - wartości pod kluczami pasującymi do `prompt`, `apiKey`, `token`, `authorization`, `password`, `secret`, `cookie`, `credential`, do `ai` jako osobnego członu nazwy (`ai`, `aiResponse`, `AI_API_KEY`, `openAiKey`; `email` czy `detail` zostają) oraz klucze `messages`, `content`, `text`, `summary` i `note`;
-- wartości takich parametrów w adresach URL (także w `Referer` i w treści komunikatów) i zapytaniach, również we fragmencie po `#`;
+- wartości takich parametrów w adresach URL i zapytaniach, również we fragmencie po `#`; w treści komunikatów (i w `Referer`) to samo dotyczy każdej pary `?klucz=wartość`, `&klucz=wartość`, `;klucz=wartość` i `#klucz=wartość`, także w adresach względnych (`/api/notes?token=...`), w `//host/...` i w gołych ciągach `a=1&apiKey=...`;
+- w treści komunikatów dodatkowo: wszystko po `Bearer ` oraz reszta linii po `prompt:`, `token=`, `password:` i podobnych (`apiKey`, `authorization`, `secret`, `credential`, `cookie`);
 - wszystkie breadcrumbs z konsoli, bo logi mogą zawierać prompty albo odpowiedzi modelu.
 
-**Komunikaty błędów lecą do Sentry prawie tak, jak je rzucisz.** Filtr rozpoznaje tylko adresy URL z tokenami i fragmenty typu `prompt: ...` lub `token=...` (resztę takiej linii zastępuje), a w błędach walidacji Convex ucina tekst od linii `Value:`, bo tam wraca odrzucona wartość. Dowolnego tekstu użytkownika wstawionego do `throw new Error(...)` nie da się rozpoznać, więc nie wkładaj tam promptów ani treści notatek.
+**Komunikaty błędów lecą do Sentry prawie tak, jak je rzucisz.** Filtr rozpoznaje tylko pary `klucz=wartość` z wrażliwym kluczem po `?`, `&`, `;` lub `#`, `Bearer <token>` i fragmenty typu `prompt: ...` lub `token=...` (resztę takiej linii zastępuje), a w błędach walidacji Convex ucina tekst od linii `Value:`, bo tam wraca odrzucona wartość. Gołe słowa bez klucza (`Invalid token abc123`, cytowany prompt) zostają. Dowolnego tekstu użytkownika wstawionego do `throw new Error(...)` nie da się rozpoznać, więc nie wkładaj tam promptów ani treści notatek.
 
 Zasady są pokryte testami w `src/lib/sentry.test.ts`. Jeśli dodajesz do zdarzeń własne dane (`Sentry.setContext` i podobne), trzymaj je pod kluczami, które filtr rozpoznaje, albo rozszerz wyrażenie w `sentry.ts`.
 
