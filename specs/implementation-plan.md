@@ -1,7 +1,7 @@
 # Implementation plan
 
 Source of truth for design: `specs/starter-architecture.md` (referred to as **ARCH section n**).
-Status: draft, review round 2 | Date: 2026-11-16
+Status: implemented | Date: 2026-11-17
 
 ## Conventions for every task
 

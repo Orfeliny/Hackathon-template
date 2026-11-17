@@ -1,6 +1,6 @@
 # Starter architecture
 
-Status: draft, review round 2 · Date: 2026-11-16
+Status: implemented, synced with the code · Date: 2026-11-17
 
 This document fixes the architecture of the HackNation engineering starter: a reusable repository
 that a small team clones at the start of a 24-hour hackathon. It is the source of truth for
@@ -57,11 +57,11 @@ that a small team clones at the start of a 24-hour hackathon. It is the source o
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | A1  | The team uses one GitHub repo, possibly owned by an organization.                                                                             | Gitleaks runs as CLI, not via `gitleaks-action`, because the action needs a (free) license key for organization repos [S20].                                      |
 | A2  | Vercel and Convex accounts, a GitHub remote and deploy keys will be supplied by the repo owner for the credential-gated tasks.                | Those tasks stop at "documented, not verified".                                                                                                                   |
-| A3  | `convex-test@0.0.71` works with Vitest 5. Its own repo still tests on Vitest 1.6 and the Convex docs describe Vitest 4 `projects` [S6].       | Task 04 (first `convex-test` use) pins `vitest`/`@vitest/coverage-v8` to `4.1.12` and records it.                                                                 |
-| A4  | Plain `fetch` works in a Convex default-runtime action [S7]; no `"use node"` needed.                                                          | Move the action file to the Node runtime (Node 22/24 supported [S7]).                                                                                             |
+| A3  | `convex-test@0.0.71` works with Vitest 5. Its own repo still tests on Vitest 1.6 and the Convex docs describe Vitest 4 `projects` [S6].       | Task 04 (first `convex-test` use) pins `vitest`/`@vitest/coverage-v8` to `4.1.12` and records it. **Settled: works on Vitest 5, no pin needed.**                  |
+| A4  | Plain `fetch` works in a Convex default-runtime action [S7]; no `"use node"` needed.                                                          | Move the action file to the Node runtime (Node 22/24 supported [S7]). **Settled: works in the default runtime.**                                                  |
 | A5  | The model server behind path 3 speaks `/v1/chat/completions`. Structured output support differs per server (§6.4).                            | Adapter falls back to prompt-only JSON mode via config.                                                                                                           |
 | A6  | A team of ~5 people, each running several lanes (git worktrees, human or agent) at once: roughly 10–25 lanes team-wide, up to ~8 per machine. | Lanes are cheap to create and clean up (§8.5); the Convex free-plan cap of 40 deployments per team [S8] is the real limit, so lane deployments expire by default. |
-| A7  | The typecheck hook stays under ~10 s on the starter.                                                                                          | Hook is dropped and only documented.                                                                                                                              |
+| A7  | The typecheck hook stays under ~10 s on the starter.                                                                                          | Hook is dropped and only documented. **Settled: about 4 s, kept.**                                                                                                |
 | A8  | The hackathon repo is **public and organization-owned** (decided with the repo owner).                                                        | GitHub merge queue is available only for public org repos or Enterprise Cloud [S34]; on another plan §14 falls back to "update branch + re-run CI before merge".  |
 
 ## 4. Stack and versions
@@ -173,6 +173,7 @@ latest ES version, `rootDir` is the directory of the `tsconfig.json`, `types` is
 │  │  ├─ mutations.ts          # add             -> api.notes.mutations.add
 │  │  ├─ actions.ts            # summarize       -> api.notes.actions.summarize
 │  │  ├─ seed.ts               # internalMutation, idempotent
+│  │  ├─ limits.ts             # shared note size limits
 │  │  └─ *.test.ts
 │  ├─ ai/                      # HOT: shared AI layer
 │  │  ├─ types.ts              # AIProvider, inputs, results, AIProviderError
@@ -190,8 +191,12 @@ latest ES version, `rootDir` is the directory of the `tsconfig.json`, `types` is
 │  ├─ lib/env.ts               # Zod-validated import.meta.env
 │  └─ test/setup.ts
 ├─ e2e/smoke.spec.ts
-├─ scripts/lane.mjs            # lane:new / lane:list / lane:rm (§8.5)
-├─ scripts/overlap.mjs         # who else touches my files (§14)
+├─ scripts/
+│  ├─ lane.mjs                 # lane:new / lane:list / lane:rm (§8.5)
+│  ├─ overlap.mjs              # who else touches my files (§14.2)
+│  ├─ codegen-check.mjs        # codegen:check (§14.5)
+│  ├─ hot-files-check.mjs      # CI hot-files job (§14.3)
+│  └─ lib/                     # hot-files.mjs, codegen-check.mjs, proc.mjs, lane-env.mjs
 ├─ docs/                       # Polish
 ├─ specs/                      # this file, the plan, and later team specs
 ├─ CLAUDE.md, SETUP_PROMPT.md, README.md, CONTRIBUTING.md, LICENSE (MIT)
@@ -216,19 +221,16 @@ add files, not edit shared ones (§14). Shared code moves to `components/ui`, `l
 - The generated API mirrors file paths: `convex/notes/queries.ts` exports `list` as
   `api.notes.queries.list`. Files inside a feature folder are named by role (`queries.ts`,
   `mutations.ts`, `actions.ts`, `seed.ts`, `tables.ts`) so references read naturally.
-- Regenerating: `npx convex codegen` generates from the contents of `convex/` and does not touch
-  the deployment [S37]. Task 04 verifies whether it works on a clean clone with no `.env.local`
-  (`npx convex codegen --typecheck disable`). **If yes**, it is the prescribed command and nobody
-  needs Convex credentials to add a module. **If no**, `npx convex dev --once` with a configured
-  deployment is required [S19], and the spec records that.
+- Regenerating: `npx convex codegen` needs a configured deployment, even though it only reads
+  `convex/` [S37]. An anonymous local one is enough:
+  `CONVEX_AGENT_MODE=anonymous npx convex dev --once`. `npm run codegen:check` also uploads the
+  functions to that deployment, so it runs locally and in lanes, not in CI.
 - **Rule:** any task that adds, renames or removes a file under `convex/` regenerates
   `_generated` in the same commit. Such tasks run **sequentially**, because two branches that both
   regenerate `_generated` conflict on merge (resolved by regenerating, §14.5).
 - Files pushed to Convex must bundle in the default runtime: no Node-only imports, and no
-  `vitest` import outside `*.test.ts`. Whether `npx convex dev --once` skips or bundles
-  `*.test.ts` under `convex/` is verified in task 04 (convex-test docs place tests there [S6]);
-  if it bundles them and fails, tests move to a `convex/__tests__` pattern the CLI ignores, and
-  the task report says so.
+  `vitest` import outside `*.test.ts`. Tests live next to the code (`convex/notes/*.test.ts`); `convexTest`
+  gets its modules from the root-absolute glob `import.meta.glob("/convex/**/*.*s")`.
 
 ## 6. AI provider architecture
 
@@ -295,7 +297,10 @@ normalization** (to `TextResult`), **error handling** (`AIProviderError`), **usa
   `Authorization: Bearer {AI_API_KEY}`, `AbortSignal.timeout(AI_TIMEOUT_MS)`, retries on network
   errors, 429 and 5xx up to `AI_MAX_RETRIES` with exponential backoff (500 ms × 2ⁿ). Response
   parsed with a Zod schema of the chat-completions shape; anything else → `bad_response`.
-  401/403 → `auth`, never retried.
+  401/403 → `auth`, never retried. 404 and 400/422 carry hints (check that `AI_BASE_URL` ends with
+  `/v1`; try another `AI_STRUCTURED_MODE`). Config caps: `AI_TIMEOUT_MS` ≤ 120000,
+  `AI_MAX_RETRIES` ≤ 3; credentials inside `AI_BASE_URL` are rejected, and plain `http` is allowed
+  only for `localhost`/`127.0.0.1`.
 
 No automatic fallback from a real provider to another real provider. If the real provider fails,
 the action returns a typed error and the UI shows "AI niedostępne" while the rest of the app works.
@@ -305,11 +310,11 @@ Switching to the mock is an explicit config change (`AI_PROVIDER=mock`).
 
 Servers differ, so the adapter has `AI_STRUCTURED_MODE`:
 
-| Mode                    | Request                                                                                                   | Known support                                                                                     |
-| ----------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `json_schema` (default) | `response_format: { type: "json_schema", json_schema: { name, schema } }`, schema from `z.toJSONSchema()` | vLLM: `json_object`, `json_schema` [S11]. llama.cpp server: schema-constrained JSON [S12].        |
-| `json_object`           | `response_format: { type: "json_object" }` + schema in the system prompt                                  | vLLM [S11]; Ollama lists "JSON mode"/`response_format` but does not document `json_schema` [S13]. |
-| `prompt`                | schema in the system prompt only                                                                          | Any server.                                                                                       |
+| Mode                    | Request                                                                                                   | Known support                                                                                                                   |
+| ----------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `json_schema` (default) | `response_format: { type: "json_schema", json_schema: { name, schema } }`, schema from `z.toJSONSchema()` | vLLM: `json_object`, `json_schema` [S11]. llama.cpp: schema-constrained JSON [S12]. Ollama `/v1` maps `json_schema` [S13][S38]. |
+| `json_object`           | `response_format: { type: "json_object" }` + schema in the system prompt                                  | vLLM [S11]; Ollama maps `response_format` `json_object` too [S13].                                                              |
+| `prompt`                | schema in the system prompt only                                                                          | Any server.                                                                                                                     |
 
 In every mode the reply is `JSON.parse`d and validated with the Zod schema; failure → `bad_response`.
 
@@ -441,9 +446,10 @@ several lanes (A6) this has to be one command, not a convention people remember.
 
 - **Ports (per machine):** ports only clash on the same machine, so lanes are numbered per
   machine. `vite.config.ts` reads `PORT` (dev, default 5173) and `PREVIEW_PORT` (preview/e2e,
-  default 4173) from the process env or the worktree's `.env.local` (`loadEnv`); both
-  `strictPort: true` so a clash fails loudly. Playwright reads the same file with Node's built-in
-  `process.loadEnvFile` (no extra dependency).
+  default 4173) from the process env or the worktree's `.env.local`; both `strictPort: true` so a
+  clash fails loudly. Vite config and Playwright share `scripts/lib/lane-env.mjs`, which parses
+  `.env.local` with `util.parseEnv` (never `process.loadEnvFile`, which would write into
+  `process.env` and override the shell).
 - **Convex (per lane):** each member has one personal cloud dev deployment by default; extra
   isolated dev deployments are created with
   `npx convex deployment create dev/<member>/<lane> --type dev --select --expiration "in 7 days"`,
@@ -459,13 +465,12 @@ several lanes (A6) this has to be one command, not a convention people remember.
   minute or two) so every later `npx convex` uses the pinned `convex@1.50.0` from that worktree's
   `node_modules` instead of downloading the latest, picks the first free lane number on this
   machine, creates and selects the Convex dev deployment `dev/<member>/<issue>-<slug>` (or
-  `--local`), then adds `PORT`/`PREVIEW_PORT` to the worktree's `.env.local`. `npm run lane:list` shows lanes with
-  ports and deployments; `npm run lane:rm -- <slug>` removes the worktree and prints the command
-  to delete the deployment (deletion stays a human action).
+  `--local`), then adds `PORT`/`PREVIEW_PORT` to the worktree's `.env.local`. Cloud lanes need
+  `npx convex login`; `--local` runs anonymously (`CONVEX_AGENT_MODE=anonymous`) without login.
+  `npm run lane:list` shows lanes with ports and deployments; `npm run lane:rm -- <slug>` removes
+  the worktree and prints a hint: delete the cloud deployment in the dashboard or let it expire
+  (convex 1.50 has no `deployment delete`); local state goes with the worktree.
 - **Reports:** written inside the worktree, so lanes never overwrite each other.
-- Unverified, checked in task 32: that later `npx convex` runs keep extra keys (`PORT`,
-  `PREVIEW_PORT`) in `.env.local`. If they don't, the script writes ports to a separate
-  gitignored `.env.lane` that Vite and Playwright also read.
 
 ### 8.6 `npm run verify`
 
@@ -492,11 +497,11 @@ run it locally if installed.
 | `lane:new` / `lane:list` / `lane:rm`    | `node scripts/lane.mjs …` (§8.5)                                                                          |
 | `overlap`                               | `node scripts/overlap.mjs` (§14.2)                                                                        |
 | `codegen:check`                         | `convex codegen` then fail if `convex/_generated` differs from what is committed (§14.5)                  |
+| `verify`                                | `run-s format:check lint typecheck test:coverage build test:e2e` (§8.6)                                   |
 
 Helper scripts in `scripts/` are plain `.mjs` (run by Node with no build step) typed with JSDoc;
 `tsconfig.node.json` includes `scripts/**` with `allowJs` + `checkJs`, so `npm run typecheck`
 checks them and their `.test.ts` files under the same strict settings.
-| `verify` | `run-s …` (§8.6) |
 
 ## 10. CI/CD
 
@@ -516,7 +521,10 @@ checks them and their `.test.ts` files under the same strict settings.
   - `secrets`: checkout with full history → download gitleaks `v8.30.1` linux_x64 + checksums,
     verify checksum → `gitleaks git --redact` (exit non-zero on findings).
   - `hot-files` (pull_request only): fails if the PR touches a hot file **and** non-hot files
-    without the acknowledged checkbox in the **live** PR body (§14.3).
+    without the acknowledged checkbox in the **live** PR body (§14.3). It restores the checker
+    and `.github/hot-files.txt` from the base commit, so a PR cannot weaken its own check, and
+    fails closed if the base commit is unreachable. The diff uses `--no-renames`, so a rename
+    counts as a delete plus an add.
   - `gate`: `needs: [verify, secrets, hot-files]`, `if: always()`. Passes only when `verify` and
     `secrets` are `success`, and `hot-files` is `success` — or `skipped` **only** when
     `github.event_name != 'pull_request'` (merge_group, workflow_call). **The only required status
@@ -528,8 +536,9 @@ checks them and their `.test.ts` files under the same strict settings.
 ### 10.2 `deploy.yml` — main
 
 - Trigger: `push` to `main` (and `workflow_dispatch`). `concurrency: deploy-production`, no cancel.
-- `verify`: `uses: ./.github/workflows/ci.yml`.
-- `deploy` (`needs: verify`, `environment: production`):
+- `verify`: `uses: ./.github/workflows/ci.yml`; the caller grants `contents: read` and
+  `pull-requests: read`, because a called workflow cannot exceed the caller's permissions.
+- `deploy` (`needs: verify`, `environment: production`): 0. Secrets are scoped per step (`env:` on the step that needs them), never job-wide.
   1. Check that `CONVEX_DEPLOY_KEY`, `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` are set;
      if any is missing, write a notice to the job summary and stop with success (the starter must
      be green before anyone has accounts).
@@ -733,3 +742,4 @@ the **live** body with `gh pr view <n> --json body` (job `permissions: pull-requ
 - [S35] GitHub Docs, Managing a merge queue (`merge_group` trigger required, no wildcard branch rules) — https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue
 - [S36] `gh pr list --json` field list (includes `files`), gh 2.95.0, run 2026-11-16
 - [S37] `npx convex@1.50.0 codegen --help` ("Regenerating it explicitly is rarely needed (e.g. in CI to ensure the correct code was checked in)"), run 2026-11-16
+- [S38] Ollama, OpenAI-compatible handler (`response_format` json_schema mapping) — https://github.com/ollama/ollama/blob/main/openai/openai.go
