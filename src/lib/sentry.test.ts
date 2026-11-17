@@ -1,7 +1,13 @@
 import type { Breadcrumb, ErrorEvent } from "@sentry/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { parseEnv } from "./env";
-import { initSentry, scrubBreadcrumb, scrubEvent, scrubUrl } from "./sentry";
+import {
+  initSentry,
+  scrubBreadcrumb,
+  scrubEvent,
+  scrubText,
+  scrubUrl,
+} from "./sentry";
 
 const sentryInit = vi.hoisted(() => vi.fn());
 vi.mock("@sentry/react", () => ({ init: sentryInit }));
@@ -42,6 +48,30 @@ describe("initSentry", () => {
         beforeBreadcrumb: scrubBreadcrumb,
       }),
     );
+  });
+
+  it("switches off every default data source explicitly", async () => {
+    await initSentry({
+      dsn: "https://key@o1.ingest.sentry.io/1",
+      environment: "production",
+      release: undefined,
+    });
+    const options = sentryInit.mock.calls[0]![0] as {
+      dataCollection: unknown;
+    };
+    expect(options.dataCollection).toEqual({
+      userInfo: false,
+      cookies: false,
+      httpHeaders: { request: { allow: ["User-Agent"] }, response: false },
+      httpBodies: [],
+      urlQueryParams: false,
+      genAI: { inputs: false, outputs: false },
+      mcp: { inputs: false, outputs: false },
+      graphQL: { document: false, variables: false },
+      databaseQueryData: false,
+      queues: false,
+      stackFrameVariables: false,
+    });
   });
 });
 
@@ -85,6 +115,14 @@ describe("scrubUrl", () => {
   });
 });
 
+describe("scrubText", () => {
+  it("leaves harmless text alone", () => {
+    expect(scrubText("Network request failed (status 500)")).toBe(
+      "Network request failed (status 500)",
+    );
+  });
+});
+
 describe("scrubEvent", () => {
   it("drops request bodies and cookies and scrubs headers and URLs", () => {
     const event = scrubEvent(
@@ -119,7 +157,7 @@ describe("scrubEvent", () => {
           aiResponse: "r",
           email: "kept",
         },
-        contexts: { custom: { authorization: "a", note: "n" } },
+        contexts: { custom: { authorization: "a", label: "n" } },
         tags: { token: "t", area: "notes" },
       }),
     );
@@ -133,9 +171,96 @@ describe("scrubEvent", () => {
       email: "kept",
     });
     expect(event.contexts).toEqual({
-      custom: { authorization: "[Filtered]", note: "n" },
+      custom: { authorization: "[Filtered]", label: "n" },
     });
     expect(event.tags).toEqual({ token: "[Filtered]", area: "notes" });
+  });
+
+  it("filters camelCase AI segments and content-shaped keys", () => {
+    const event = scrubEvent(
+      baseEvent({
+        extra: {
+          openAiKey: "k",
+          messages: ["hi"],
+          content: "c",
+          text: "t",
+          summary: "s",
+          note: "n",
+          context: "kept",
+          maid: "kept",
+        },
+      }),
+    );
+    expect(event.extra).toEqual({
+      openAiKey: "[Filtered]",
+      messages: "[Filtered]",
+      content: "[Filtered]",
+      text: "[Filtered]",
+      summary: "[Filtered]",
+      note: "[Filtered]",
+      context: "kept",
+      maid: "kept",
+    });
+  });
+
+  it("scrubs a prompt inside exception.values[].value and the message", () => {
+    const event = scrubEvent(
+      baseEvent({
+        message: "failed prompt: my secret diary",
+        exception: {
+          values: [
+            {
+              type: "Error",
+              value:
+                "summarize failed, prompt: my secret diary https://x.test/?token=abc",
+            },
+            { type: "Error" },
+          ],
+        },
+      }),
+    );
+    expect(event.message).toBe("failed prompt: [Filtered]");
+    expect(event.exception?.values?.[0]?.value).not.toMatch(/diary|abc/);
+    expect(event.exception?.values?.[1]).toEqual({ type: "Error" });
+  });
+
+  it("cuts Convex validator text where it echoes the rejected value", () => {
+    const value =
+      "[Request ID: r1] Server Error\nArgumentValidationError: bad args\nPath: .text\nValue: my private note\nValidator: v.string()";
+    const event = scrubEvent(
+      baseEvent({ exception: { values: [{ type: "Error", value }] } }),
+    );
+    const scrubbed = event.exception?.values?.[0]?.value;
+    expect(scrubbed).not.toMatch(/private note|Validator/);
+    expect(scrubbed).toContain("ArgumentValidationError");
+  });
+
+  it("filters a token URL inside a message", () => {
+    const event = scrubEvent(
+      baseEvent({
+        message: "fetch https://api.test/v1?api_key=sk-123&page=2 failed",
+      }),
+    );
+    expect(event.message).toBe(
+      "fetch https://api.test/v1?api_key=[Filtered]&page=2 failed",
+    );
+  });
+
+  it("filters a token in the Referer header", () => {
+    const event = scrubEvent(
+      baseEvent({
+        request: {
+          headers: {
+            Referer: "https://login.test/cb?access_token=leak&x=1",
+            "User-Agent": "UA",
+          },
+        },
+      }),
+    );
+    expect(event.request?.headers).toEqual({
+      Referer: "https://login.test/cb?access_token=[Filtered]&x=1",
+      "User-Agent": "UA",
+    });
   });
 
   it("scrubs breadcrumbs inside the event and drops console ones", () => {
@@ -170,9 +295,26 @@ describe("scrubEvent", () => {
 });
 
 describe("scrubBreadcrumb", () => {
-  it("returns breadcrumbs without data untouched", () => {
+  it("keeps harmless breadcrumbs without data", () => {
     const crumb: Breadcrumb = { category: "ui.click", message: "button" };
-    expect(scrubBreadcrumb(crumb)).toBe(crumb);
+    expect(scrubBreadcrumb(crumb)).toEqual(crumb);
+  });
+
+  it("scrubs the message of sentry.event breadcrumbs", () => {
+    const crumb = scrubBreadcrumb({
+      category: "sentry.event",
+      message: "Error: prompt: my diary https://x.test/?token=abc",
+    });
+    expect(crumb?.message).not.toMatch(/diary|abc/);
+  });
+
+  it("drops response bodies as well as request bodies", () => {
+    expect(
+      scrubBreadcrumb({
+        category: "xhr",
+        data: { response_body: "r", responseBody: "r", request_body: "q" },
+      })?.data,
+    ).toEqual({});
   });
 
   it("filters navigation URLs", () => {

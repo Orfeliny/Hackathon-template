@@ -99,7 +99,7 @@ Nie ustawiaj `VITE_CONVEX_URL` w Vercelu także tutaj.
 
 ## Sentry (opcjonalnie)
 
-Front ma wbudowaną, ale wyłączoną domyślnie obsługę Sentry (`@sentry/react`, kod w `src/lib/sentry.ts`). Bez `VITE_SENTRY_DSN` biblioteka nie jest nawet pobierana: ładuje się dynamicznym `import()` dopiero wtedy, gdy adres jest ustawiony, więc domyślna paczka się nie powiększa. Testy e2e i CI nie mają DSN-a i nie powinny go mieć.
+Front ma wbudowaną, ale wyłączoną domyślnie obsługę Sentry (`@sentry/react`, kod w `src/lib/sentry.ts`). Bez `VITE_SENTRY_DSN` biblioteka nie jest nawet pobierana: ładuje się dynamicznym `import()` dopiero wtedy, gdy adres jest ustawiony, więc domyślna paczka się nie powiększa. Testy e2e i CI nie mają DSN-a: `.env.e2e` zeruje `VITE_SENTRY_DSN`, więc DSN z `.env.local` nie wysyła zdarzeń z lokalnych `npm run test:e2e` ani `npm run verify`.
 
 ### Włączenie we froncie
 
@@ -119,20 +119,24 @@ Dzięki nim stack trace w Sentry pokazuje kod źródłowy zamiast zminifikowaneg
 
 Sekret dodajesz tam, gdzie pozostałe (sekcja 3), a zmienne w _Settings > Secrets and variables > Actions > Variables_. Token dostaje wyłącznie krok buildu w `deploy.yml`. Po wysłaniu pliki `*.map` są usuwane z `dist`, więc nie trafiają na Vercel i nikt ich nie pobierze z publicznego adresu.
 
+Nieudane wgranie map (zły token, organizacja albo projekt) **nie przerywa deployu**: wtyczka tylko loguje błąd, a strona działa dalej, tyle że stack trace w Sentry będzie zminifikowany. Po pierwszym deployu poszukaj w logu kroku buildu linii `[sentry-vite-plugin]`.
+
 ### Co jest wycinane przed wysyłką
 
-Hook `beforeSend` (i `beforeBreadcrumb`) usuwa z każdego zdarzenia:
+Sentry SDK 11 domyślnie zbiera prawie wszystko (dane użytkownika i jego adres IP, ciasteczka, nagłówki, ciała żądań i odpowiedzi, parametry zapytań, wejścia i wyjścia AI). Dlatego `initSentry` wyłącza każde z tych źródeł jawnie w opcji `dataCollection` (wysyłany jest tylko nagłówek `User-Agent`; test pilnuje całej listy), a dodatkowo hooki `beforeSend` i `beforeBreadcrumb` usuwają ze zdarzeń:
 
-- ciała żądań i ciasteczka;
-- wartości pod kluczami pasującymi do `prompt`, `apiKey`, `token`, `authorization`, `password`, `secret`, `cookie`, `credential` oraz do `ai` jako osobnego członu nazwy (`ai`, `aiResponse`, `AI_API_KEY`; `email` czy `detail` zostają);
-- wartości takich parametrów w adresach URL i zapytaniach, także we fragmencie po `#`;
+- ciała żądań i odpowiedzi oraz ciasteczka;
+- wartości pod kluczami pasującymi do `prompt`, `apiKey`, `token`, `authorization`, `password`, `secret`, `cookie`, `credential`, do `ai` jako osobnego członu nazwy (`ai`, `aiResponse`, `AI_API_KEY`, `openAiKey`; `email` czy `detail` zostają) oraz klucze `messages`, `content`, `text`, `summary` i `note`;
+- wartości takich parametrów w adresach URL (także w `Referer` i w treści komunikatów) i zapytaniach, również we fragmencie po `#`;
 - wszystkie breadcrumbs z konsoli, bo logi mogą zawierać prompty albo odpowiedzi modelu.
+
+**Komunikaty błędów lecą do Sentry prawie tak, jak je rzucisz.** Filtr rozpoznaje tylko adresy URL z tokenami i fragmenty typu `prompt: ...` lub `token=...` (resztę takiej linii zastępuje), a w błędach walidacji Convex ucina tekst od linii `Value:`, bo tam wraca odrzucona wartość. Dowolnego tekstu użytkownika wstawionego do `throw new Error(...)` nie da się rozpoznać, więc nie wkładaj tam promptów ani treści notatek.
 
 Zasady są pokryte testami w `src/lib/sentry.test.ts`. Jeśli dodajesz do zdarzeń własne dane (`Sentry.setContext` i podobne), trzymaj je pod kluczami, które filtr rozpoznaje, albo rozszerz wyrażenie w `sentry.ts`.
 
 ### Backend (Convex)
 
-Backend nie wymaga zmian w kodzie. Convex ma własną integrację z Sentry, ale **tylko w planie Pro**: w panelu otwórz _Deployment Settings > Integrations_, wybierz kartę Sentry i podaj DSN osobnego projektu Sentry z platformą **Node.js**. Convex dodaje do zdarzeń tagi `func`, `func_type`, `func_runtime`, `request_id`, `server_name` i `environment` ([Convex: Exception reporting](https://docs.convex.dev/production/integrations/exception-reporting)). Filtr z frontu tu nie działa, więc w akcjach AI nie wkładaj promptów do komunikatów błędów.
+Backend nie wymaga zmian w kodzie. Convex ma własną integrację z Sentry, ale **tylko w planie Pro**: w panelu otwórz _Deployment Settings > Integrations_, wybierz kartę Sentry i podaj DSN osobnego projektu Sentry z platformą **Node.js**. Convex dodaje do zdarzeń tagi `func`, `func_type`, `func_runtime`, `request_id`, `server_name`, `environment` oraz `user` (`tokenIdentifier` zalogowanego użytkownika, gdy funkcja jest uwierzytelniona; starter nie ma jeszcze logowania, ale po jego dodaniu te dane trafią do Sentry) ([Convex: Exception reporting](https://docs.convex.dev/production/integrations/exception-reporting)). Filtr z frontu tu nie działa, więc w akcjach AI nie wkładaj promptów do komunikatów błędów.
 
 ## Kontenery i GHCR (później)
 

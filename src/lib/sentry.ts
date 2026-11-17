@@ -1,15 +1,25 @@
-import type { Breadcrumb, ErrorEvent } from "@sentry/react";
+import type { Breadcrumb, BrowserOptions, ErrorEvent } from "@sentry/react";
 
 const FILTERED = "[Filtered]";
 const MAX_DEPTH = 8;
 
-const SENSITIVE_KEY =
-  /prompt|api[-_]?key|token|authorization|password|secret|cookie|credential/i;
+const SENSITIVE_WORD =
+  "prompt|api[-_]?key|token|authorization|password|secret|cookie|credential";
+const SENSITIVE_KEY = new RegExp(SENSITIVE_WORD, "i");
 // Case-sensitive on purpose: a bare /ai/i would also hit "email" or "detail".
-const AI_KEY = /(^|[-_.])(ai|AI)($|[-_.A-Z])/;
+// Covers `ai`, `ai_x`, `aiResponse`, `AI_API_KEY` and a camelCase segment as in `openAiKey`.
+const AI_KEY = /(^|[-_.])(ai|AI)($|[-_.A-Z])|[a-z]Ai($|[-_.A-Z0-9])/;
+const CONTENT_KEY = /^(messages?|content|text|summary|notes?)$/i;
+const BODY_KEYS = [
+  "body",
+  "request_body",
+  "requestBody",
+  "response_body",
+  "responseBody",
+];
 
 function isSensitiveKey(key: string): boolean {
-  return SENSITIVE_KEY.test(key) || AI_KEY.test(key);
+  return SENSITIVE_KEY.test(key) || AI_KEY.test(key) || CONTENT_KEY.test(key);
 }
 
 function safeDecode(value: string): string {
@@ -28,8 +38,25 @@ export function scrubUrl(url: string): string {
   );
 }
 
+const SENSITIVE_ASSIGNMENT = new RegExp(
+  `(?<![?&;#])\\b(\\w*(?:${SENSITIVE_WORD})\\w*)\\s*[:=]\\s*[^\\r\\n]*`,
+  "gi",
+);
+
+// Error messages are free text: filter what can be recognised, and cut Convex validator
+// errors where they start echoing the rejected value ("Value: ...").
+export function scrubText(text: string): string {
+  const valueLine = text.search(/\r?\n\s*Value:/);
+  const head = valueLine === -1 ? text : text.slice(0, valueLine);
+  const scrubbed = head
+    .replace(/https?:\/\/[^\s"'<>)]+/g, scrubUrl)
+    .replace(SENSITIVE_ASSIGNMENT, `$1: ${FILTERED}`);
+  return valueLine === -1 ? scrubbed : `${scrubbed}\n${FILTERED}`;
+}
+
 function redact(value: unknown, depth = 0): unknown {
   if (depth > MAX_DEPTH) return FILTERED;
+  if (typeof value === "string") return scrubText(value);
   if (Array.isArray(value)) return value.map((item) => redact(item, depth + 1));
   if (value !== null && typeof value === "object") {
     return Object.fromEntries(
@@ -45,17 +72,31 @@ function redact(value: unknown, depth = 0): unknown {
 export function scrubBreadcrumb(breadcrumb: Breadcrumb): Breadcrumb | null {
   // Console output can carry prompts or model answers.
   if (breadcrumb.category === "console") return null;
-  if (!breadcrumb.data) return breadcrumb;
+  const scrubbed: Breadcrumb = { ...breadcrumb };
+  if (breadcrumb.message) scrubbed.message = scrubText(breadcrumb.message);
+  if (!breadcrumb.data) return scrubbed;
   const data = redact(breadcrumb.data) as Record<string, unknown>;
-  for (const key of ["body", "request_body", "requestBody"]) delete data[key];
-  if (typeof data.url === "string") data.url = scrubUrl(data.url);
-  if (typeof data.from === "string") data.from = scrubUrl(data.from);
-  if (typeof data.to === "string") data.to = scrubUrl(data.to);
-  return { ...breadcrumb, data };
+  for (const key of BODY_KEYS) delete data[key];
+  for (const key of ["url", "from", "to"]) {
+    if (typeof data[key] === "string") data[key] = scrubUrl(data[key]);
+  }
+  scrubbed.data = data;
+  return scrubbed;
 }
 
 export function scrubEvent(event: ErrorEvent): ErrorEvent {
   const scrubbed: ErrorEvent = { ...event };
+  if (event.message) scrubbed.message = scrubText(event.message);
+  if (event.exception?.values) {
+    scrubbed.exception = {
+      ...event.exception,
+      values: event.exception.values.map((exception) =>
+        exception.value
+          ? { ...exception, value: scrubText(exception.value) }
+          : exception,
+      ),
+    };
+  }
   if (event.request) {
     const request = { ...event.request };
     delete request.data;
@@ -90,6 +131,22 @@ export type SentryOptions = {
   release: string | undefined;
 };
 
+// v11 collects almost everything by default (user info and IP inference, cookies, all headers,
+// HTTP and AI bodies, query params), so each source is switched off explicitly.
+export const DATA_COLLECTION: NonNullable<BrowserOptions["dataCollection"]> = {
+  userInfo: false,
+  cookies: false,
+  httpHeaders: { request: { allow: ["User-Agent"] }, response: false },
+  httpBodies: [],
+  urlQueryParams: false,
+  genAI: { inputs: false, outputs: false },
+  mcp: { inputs: false, outputs: false },
+  graphQL: { document: false, variables: false },
+  databaseQueryData: false,
+  queues: false,
+  stackFrameVariables: false,
+};
+
 // The dynamic import keeps @sentry/react out of the default bundle: it is only fetched with a DSN.
 export async function initSentry(options: SentryOptions): Promise<boolean> {
   if (!options.dsn) return false;
@@ -98,6 +155,7 @@ export async function initSentry(options: SentryOptions): Promise<boolean> {
     dsn: options.dsn,
     environment: options.environment,
     release: options.release,
+    dataCollection: DATA_COLLECTION,
     beforeSend: scrubEvent,
     beforeBreadcrumb: scrubBreadcrumb,
   });
