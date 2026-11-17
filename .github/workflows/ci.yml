@@ -25,8 +25,37 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - name: Read Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: pw-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+      - name: Install Playwright Chromium
+        env:
+          CACHE_HIT: ${{ steps.pw-cache.outputs.cache-hit }}
+        # Cached browsers still need their OS packages, which live outside the cache.
+        run: |
+          if [ "$CACHE_HIT" = "true" ]; then
+            npx playwright install-deps chromium
+          else
+            npx playwright install --with-deps chromium
+          fi
       - run: npm run verify
+      - name: Coverage summary
+        if: ${{ !cancelled() }}
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            if (!fs.existsSync("coverage/coverage-summary.json")) process.exit(0);
+            const t = JSON.parse(fs.readFileSync("coverage/coverage-summary.json", "utf8")).total;
+            const rows = ["lines", "statements", "functions", "branches"]
+              .map((k) => `| ${k} | ${t[k].pct}% | ${t[k].covered}/${t[k].total} |`);
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+              ["### Coverage", "", "| Metric | Covered | Count |", "|---|---|---|", ...rows, ""].join("\n"));
+          '
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -61,6 +90,7 @@ jobs:
         # A PR must not be able to weaken its own check. Files absent at base (the PR that
         # introduces the checker) keep the PR's copy.
         run: |
+          git cat-file -e "$BASE_SHA^{commit}" || { echo "base commit $BASE_SHA is not reachable" >&2; exit 1; }
           for f in scripts/hot-files-check.mjs scripts/lib/hot-files.mjs .github/hot-files.txt; do
             if git cat-file -e "$BASE_SHA:$f" 2>/dev/null; then
               git checkout "$BASE_SHA" -- "$f"
@@ -104,6 +134,7 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions: {}
     concurrency:
       group: ci-${{ github.event_name }}-${{ github.ref }}-gate
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}

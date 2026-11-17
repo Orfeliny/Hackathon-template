@@ -1,12 +1,11 @@
 import { z } from "zod";
-
-export const MAX_NOTE_LENGTH = 500;
+import { MAX_NOTE_LENGTH, MIN_NOTE_LENGTH } from "../../../convex/notes/limits";
 
 export const noteFormSchema = z.object({
   text: z
     .string()
     .trim()
-    .min(1, "Wpisz treść notatki.")
+    .min(MIN_NOTE_LENGTH, "Wpisz treść notatki.")
     .max(
       MAX_NOTE_LENGTH,
       `Notatka może mieć najwyżej ${MAX_NOTE_LENGTH} znaków.`,

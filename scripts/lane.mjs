@@ -4,10 +4,9 @@ import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseEnv } from "node:util";
+import { BASE_PORT, BASE_PREVIEW_PORT, readLocalEnv } from "./lib/lane-env.mjs";
+import { CONVEX_BIN, runForOutput } from "./lib/proc.mjs";
 
-export const BASE_PORT = 5173;
-export const BASE_PREVIEW_PORT = 4173;
 export const MAX_LANES = 100;
 
 const NAME_PART = /^[A-Za-z0-9-]+$/;
@@ -214,14 +213,14 @@ export function findLane(slug, lanes) {
 }
 
 /**
- * Reference to delete, taken from CONVEX_DEPLOYMENT (`dev:<name> # team: ..., project: ...`,
- * or `local:<name>`); falls back to the reference the lane was created with.
+ * The Convex CLI has no `deployment delete`: cloud deployments are removed in the dashboard
+ * or expire, local ones live inside the worktree. CONVEX_DEPLOYMENT is `local:<name>` for local.
  * @param {Lane} lane
  */
 export function deletionHint(lane) {
-  const raw = lane.deployment?.split("#")[0]?.trim();
-  const target = raw ? raw.replace(/^[a-z]+:/, "") : lane.slug;
-  return `npx convex deployment delete ${target}`;
+  if (lane.deployment?.startsWith("local:"))
+    return `Its data lives in ${join(lane.path, ".convex", "local", "default")} and is removed with the worktree.`;
+  return 'Delete it in the Convex dashboard (Project -> Deployments) or let it expire (created with --expiration "in 7 days").';
 }
 
 /**
@@ -285,7 +284,6 @@ export async function laneNew(deps, args) {
       ? "Creating local Convex deployment"
       : `Creating Convex deployment ${reference} (expires in 7 days)`,
   );
-  const convexBin = join("node_modules", "convex", "bin", "main.js");
   const create = args.local
     ? ["deployment", "create", "local", "--select"]
     : [
@@ -300,7 +298,7 @@ export async function laneNew(deps, args) {
       ];
   must(
     process.execPath,
-    [convexBin, ...create],
+    [CONVEX_BIN, ...create],
     lanePath,
     args.local ? { CONVEX_AGENT_MODE: "anonymous" } : undefined,
   );
@@ -338,7 +336,7 @@ export function laneRm(deps, args) {
     );
   deps.log(
     `Removed worktree ${lane.path}. Branch ${lane.branch} is kept (delete it with \`git branch -d ${lane.branch}\` once merged).\n` +
-      `The Convex deployment is NOT deleted. To delete it, run:\n  ${deletionHint(lane)}`,
+      `The Convex deployment is NOT deleted. ${deletionHint(lane)}`,
   );
   return lane;
 }
@@ -350,16 +348,6 @@ function probePort(port) {
     server.once("error", () => done(false));
     server.listen(port, () => server.close(() => done(true)));
   });
-}
-
-/** @param {string} dir @returns {Record<string, string>} */
-function readEnvFile(dir) {
-  const file = join(dir, ".env.local");
-  return existsSync(file)
-    ? /** @type {Record<string, string>} */ (
-        parseEnv(readFileSync(file, "utf8"))
-      )
-    : {};
 }
 
 /** @returns {Deps} */
@@ -384,13 +372,9 @@ function realDeps() {
         ).status ?? 1
       );
     },
-    output: (command, args, cwd) => {
-      const result = spawnSync(command, args, { cwd, encoding: "utf8" });
-      if (result.status !== 0) throw new Error(`git failed: ${result.stderr}`);
-      return result.stdout;
-    },
+    output: runForOutput,
     isPortFree: probePort,
-    readEnv: readEnvFile,
+    readEnv: readLocalEnv,
     writeEnv: (dir, values) => {
       const file = join(dir, ".env.local");
       const current = existsSync(file) ? readFileSync(file, "utf8") : "";

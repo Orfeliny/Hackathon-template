@@ -1,6 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
-import { parseEnv } from "node:util";
 import { defineConfig, devices } from "@playwright/test";
+import { resolvePorts } from "./scripts/lib/lane-env.mjs";
 
 if (process.env.VITE_CONVEX_URL) {
   throw new Error(
@@ -8,11 +7,13 @@ if (process.env.VITE_CONVEX_URL) {
   );
 }
 
-// Parsed instead of loadEnvFile so .env.local's VITE_CONVEX_URL never reaches process.env.
-const localEnv = existsSync(".env.local")
-  ? parseEnv(readFileSync(".env.local", "utf8"))
-  : {};
-const port = Number(process.env.PREVIEW_PORT ?? localEnv.PREVIEW_PORT ?? 4173);
+if (process.env.VITE_SENTRY_DSN) {
+  throw new Error(
+    "VITE_SENTRY_DSN is set in your shell; shell variables beat .env.e2e and would let the smoke test send events to Sentry. Unset it and retry.",
+  );
+}
+
+const { previewPort: port } = resolvePorts(process.cwd());
 const isCI = Boolean(process.env.CI);
 
 export default defineConfig({
