@@ -6,6 +6,7 @@ import {
   pinnedVercel,
   RULESET_NAME,
   rulesetPayload,
+  rulesetTargetsMain,
   runSetup,
 } from "./setup-deploy.mjs";
 
@@ -38,6 +39,10 @@ interface World {
   files?: Record<string, string>;
   keyOutput?: string;
   failSecretSet?: boolean;
+  envProbeError?: string;
+  vercelProjectExists?: boolean;
+  vercelProjectId?: string;
+  prodMissing?: boolean;
 }
 
 function setup(world: World = {}, argv: string[] = ["--yes"]) {
@@ -48,6 +53,8 @@ function setup(world: World = {}, argv: string[] = ["--yes"]) {
     ...world.files,
   };
   const key = (p: string) => p.replaceAll("\\", "/");
+  let projectCreated = false;
+  let prodCreated = false;
 
   const run = (
     command: string,
@@ -80,7 +87,11 @@ function setup(world: World = {}, argv: string[] = ["--yes"]) {
           ? bad("HTTP 404: Not Found")
           : ok(JSON.stringify((world.secrets ?? []).map((name) => ({ name }))));
       if (line === "api repos/team/my-hack/environments/production")
-        return world.envExists ? ok("{}") : bad("404");
+        return world.envProbeError
+          ? bad(world.envProbeError)
+          : world.envExists
+            ? ok("{}")
+            : bad("gh: Not Found (HTTP 404)");
       if (line.includes("--method PUT")) return ok();
       if (line === "api repos/team/my-hack/rulesets")
         return ok(
@@ -111,8 +122,26 @@ function setup(world: World = {}, argv: string[] = ["--yes"]) {
       return world.convexLoggedIn === false ? bad("no") : ok();
     if (command === "npx" && line.endsWith("whoami"))
       return world.vercelLoggedIn === false ? bad("no") : ok("me");
+    if (command === "npx" && line.includes("project inspect"))
+      return world.vercelProjectExists === false && !projectCreated
+        ? bad("Error: project not found")
+        : ok(JSON.stringify({ id: world.vercelProjectId ?? "prj_1" }));
+    if (command === "npx" && line.includes(" link ")) {
+      files[key(".vercel/project.json")] ??= PROJECT_JSON;
+      return ok();
+    }
+    if (command === "npx" && line.includes("project create")) {
+      projectCreated = true;
+      return ok();
+    }
+    if (line.includes("deployment create")) {
+      prodCreated = true;
+      return ok();
+    }
     if (line.includes("token create"))
-      return ok(`${world.keyOutput ?? DEPLOY_KEY}\n`);
+      return world.prodMissing && !prodCreated
+        ? bad("no production deployment")
+        : ok(`${world.keyOutput ?? DEPLOY_KEY}\n`);
     return ok();
   };
 
@@ -171,6 +200,32 @@ describe("parseArgs and helpers", () => {
     ).toBe(false);
     expect(hasCloudDeployment("CONVEX_DEPLOYMENT=local:local-me")).toBe(false);
     expect(hasCloudDeployment("OTHER=1")).toBe(false);
+  });
+
+  it("treats a ruleset as covering main unless main is excluded", () => {
+    expect(
+      rulesetTargetsMain({
+        conditions: { ref_name: { include: ["~DEFAULT_BRANCH"] } },
+      }),
+    ).toBe(true);
+    expect(
+      rulesetTargetsMain({
+        conditions: {
+          ref_name: { include: ["~ALL"], exclude: ["refs/heads/main"] },
+        },
+      }),
+    ).toBe(false);
+    expect(
+      rulesetTargetsMain({
+        conditions: {
+          ref_name: {
+            include: ["~ALL"],
+            exclude: ["refs/heads/release"],
+          },
+        },
+      }),
+    ).toBe(true);
+    expect(rulesetTargetsMain({})).toBe(false);
   });
 
   it("builds the ruleset from ARCH 10.3", () => {
@@ -378,7 +433,20 @@ describe("runSetup", () => {
     expect(parseGithubSlug("https://github.com/team/my-hack")).toBe(
       "team/my-hack",
     );
+    expect(parseGithubSlug("ssh://git@github.com/team/my-hack.git")).toBe(
+      "team/my-hack",
+    );
     expect(parseGithubSlug("https://gitlab.com/team/x.git")).toBeNull();
+    for (const evil of [
+      "https://evilgithub.com/team/x.git",
+      "https://github.com.evil.io/team/x.git",
+      "https://evil.io/github.com/team/x.git",
+      "git@evilgithub.com:team/x.git",
+      "git@github.com.evil.io:team/x.git",
+      "ssh://git@evilgithub.com/team/x.git",
+      "https://github.com@evil.io/team/x.git",
+    ])
+      expect(parseGithubSlug(evil)).toBeNull();
     const w = setup({ origin: "https://gitlab.com/team/x.git" });
     expect(await w.exec()).toBe(1);
     expect(w.logs.join(" ")).toMatch(/nie wskazuje na repozytorium GitHuba/);
@@ -388,6 +456,94 @@ describe("runSetup", () => {
     const bad1 = setup({ files: { ".vercel/project.json": "{nope" } });
     expect(await bad1.exec()).toBe(1);
     expect(bad1.logs.join(" ")).toMatch(/Błąd: Plik \.vercel\/project\.json/);
+  });
+
+  it("treats only an HTTP 404 as a missing environment", async () => {
+    for (const argv of [["--yes"], ["--dry-run"]]) {
+      for (const err of [
+        "gh: Resource not accessible (HTTP 403)",
+        "error connecting to api.github.com",
+      ]) {
+        const w = setup(
+          {
+            envProbeError: err,
+            files: { ".vercel/project.json": PROJECT_JSON },
+          },
+          argv,
+        );
+        expect(await w.exec()).toBe(1);
+        expect(w.logs.join("\n")).toMatch(/Błąd: Sprawdzenie środowiska/);
+        expect(w.logs.join("\n")).toContain(err);
+        expect(w.mutations()).toEqual([]);
+      }
+    }
+  });
+
+  it("creates the Convex prod deployment when the key cannot be created, and retries", async () => {
+    const w = setup({
+      prodMissing: true,
+      files: { ".vercel/project.json": PROJECT_JSON },
+    });
+    expect(await w.exec()).toBe(0);
+    const names = w.calls.map((c) => c.args.join(" "));
+    const create = names.findIndex((l) => l.includes("deployment create"));
+    expect(names[create]).toContain("--type prod --default");
+    expect(names.filter((l) => l.includes("token create"))).toHaveLength(2);
+    expect(names.findIndex((l) => l.includes("token create"))).toBeLessThan(
+      create,
+    );
+
+    const healthy = setup({ files: { ".vercel/project.json": PROJECT_JSON } });
+    await healthy.exec();
+    expect(
+      healthy.calls.some((c) => c.args.join(" ").includes("deployment create")),
+    ).toBe(false);
+  });
+
+  it("creates a missing Vercel project before linking, and only when absent", async () => {
+    const w = setup({ vercelProjectExists: false });
+    expect(await w.exec()).toBe(0);
+    const names = w.calls.map((c) => c.args.join(" "));
+    const create = names.findIndex((l) => l.includes("project create my-hack"));
+    const link = names.findIndex((l) => l.includes(" link "));
+    expect(create).toBeGreaterThan(-1);
+    expect(link).toBeGreaterThan(create);
+
+    const present = setup();
+    await present.exec();
+    expect(
+      present.calls.some((c) => c.args.join(" ").includes("project create")),
+    ).toBe(false);
+
+    const dry = setup({ vercelProjectExists: false }, ["--dry-run"]);
+    expect(await dry.exec()).toBe(0);
+    expect(dry.mutations()).toEqual([]);
+    expect(dry.logs.join("\n")).toMatch(/\[dry-run\] Vercel: tworzę projekt/);
+  });
+
+  it("re-links when .vercel/project.json points at another project", async () => {
+    const stale = setup({
+      vercelProjectId: "prj_other",
+      files: { ".vercel/project.json": PROJECT_JSON },
+    });
+    expect(await stale.exec()).toBe(0);
+    expect(stale.calls.some((c) => c.args.includes("link"))).toBe(true);
+    expect(stale.logs.join("\n")).toMatch(/nie pasuje do projektu/);
+
+    const match = setup({ files: { ".vercel/project.json": PROJECT_JSON } });
+    await match.exec();
+    expect(match.calls.some((c) => c.args.includes("link"))).toBe(false);
+
+    const dry = setup(
+      {
+        vercelProjectId: "prj_other",
+        files: { ".vercel/project.json": PROJECT_JSON },
+      },
+      ["--dry-run"],
+    );
+    await dry.exec();
+    expect(dry.mutations()).toEqual([]);
+    expect(dry.logs.join("\n")).toMatch(/\[dry-run\] Vercel: .*nie pasuje/);
   });
 
   it("scrubs secrets from errors", async () => {

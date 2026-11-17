@@ -65,18 +65,39 @@ export function rulesetPayload() {
 
 class SetupError extends Error {}
 
-/** @param {string} url @returns {string | null} owner/name of a GitHub remote URL */
+const GITHUB_REMOTE_FORMS = [
+  /^https?:\/\/(?:[^@/\s]+@)?github\.com\/([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/,
+  /^ssh:\/\/git@github\.com(?::22)?\/([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/,
+  /^git@github\.com:([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/,
+];
+
+/** @param {string} url @returns {string | null} owner/name of a github.com remote URL (exact host) */
 export function parseGithubSlug(url) {
-  const match = /github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/.exec(url);
-  return match ? `${match[1]}/${match[2]}` : null;
+  for (const form of GITHUB_REMOTE_FORMS) {
+    const match = form.exec(url.trim());
+    if (match) return `${match[1]}/${match[2]}`;
+  }
+  return null;
 }
 
-/** @param {{ conditions?: { ref_name?: { include?: string[] } } }} ruleset */
+/** @param {{ conditions?: { ref_name?: { include?: string[], exclude?: string[] } } }} ruleset */
 export function rulesetTargetsMain(ruleset) {
-  const include = ruleset.conditions?.ref_name?.include ?? [];
-  return include.some((ref) =>
-    ["~DEFAULT_BRANCH", "~ALL", "refs/heads/main"].includes(ref),
-  );
+  const { include = [], exclude = [] } = ruleset.conditions?.ref_name ?? {};
+  const matchesMain = (/** @type {string[]} */ refs) =>
+    refs.some((ref) =>
+      ["~DEFAULT_BRANCH", "~ALL", "refs/heads/main"].includes(ref),
+    );
+  return matchesMain(include) && !matchesMain(exclude);
+}
+
+/** @param {string} stdout @returns {string | null} project id from `vercel project inspect --json` */
+function inspectedProjectId(stdout) {
+  try {
+    const id = JSON.parse(stdout)?.id;
+    return typeof id === "string" && id !== "" ? id : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -208,8 +229,13 @@ export async function runSetup(argv, deps) {
     const deployYml = deps.readFile(join(".github", "workflows", "deploy.yml"));
     if (deployYml === null) fail("Brak .github/workflows/deploy.yml.");
     const vercelVersion = pinnedVercel(/** @type {string} */ (deployYml));
+    const vercelArgs = (/** @type {string[]} */ args) => [
+      "--yes",
+      `vercel@${vercelVersion}`,
+      ...args,
+    ];
     const vercel = (/** @type {string[]} */ args) =>
-      run("npx", ["--yes", `vercel@${vercelVersion}`, ...args]);
+      run("npx", vercelArgs(args));
     if (vercel(["whoami"]).status !== 0)
       fail(
         "Vercel: brak logowania. Uruchom `npx vercel@" +
@@ -218,7 +244,12 @@ export async function runSetup(argv, deps) {
       );
 
     const envPath = `repos/${repo.nameWithOwner}/environments/${ENVIRONMENT}`;
-    const envExists = run("gh", ["api", envPath]).status === 0;
+    const envProbe = run("gh", ["api", envPath]);
+    const envExists = envProbe.status === 0;
+    if (!envExists && !/HTTP 404/.test(`${envProbe.stderr}${envProbe.stdout}`))
+      fail(
+        `Sprawdzenie środowiska ${ENVIRONMENT} nie powiodło się: ${envProbe.stderr.trim() || "brak komunikatu"}`,
+      );
     // Environments are not copied from a template, and listing the secrets of a missing one is a 404.
     const existing = new Set(
       envExists
@@ -288,20 +319,33 @@ export async function runSetup(argv, deps) {
         "Convex: tworzę produkcyjny klucz wdrożeniowy (nie jest wypisywany ani zapisywany).",
       );
       if (!dryRun) {
-        const key = must(
-          "Tworzenie klucza Convex",
-          process.execPath,
-          [
-            CONVEX_BIN,
-            "deployment",
-            "token",
-            "create",
-            "github-actions",
-            "--prod",
-          ],
-          undefined,
-          "Jeśli brakuje deploymentu produkcyjnego (nie sprawdzone na żywym koncie): `npx convex deployment create --type prod --default` albo utwórz go w panelu Convex.",
-        ).stdout.trim();
+        const tokenArgs = [
+          CONVEX_BIN,
+          "deployment",
+          "token",
+          "create",
+          "github-actions",
+          "--prod",
+        ];
+        // `convex dev --configure new` provisions only the dev deployment (createProject in cli.bundle.cjs),
+        // so a fresh project has no prod one until it is created here.
+        let tokenResult = run(process.execPath, tokenArgs);
+        if (tokenResult.status !== 0) {
+          log("Convex: tworzę wdrożenie produkcyjne (deployment create).");
+          must(
+            "Tworzenie wdrożenia produkcyjnego Convex",
+            process.execPath,
+            [CONVEX_BIN, "deployment", "create", "--type", "prod", "--default"],
+            { interactive: true },
+            "Możesz też utworzyć wdrożenie produkcyjne w panelu Convex.",
+          );
+          tokenResult = must(
+            "Tworzenie klucza Convex",
+            process.execPath,
+            tokenArgs,
+          );
+        }
+        const key = tokenResult.stdout.trim();
         if (!DEPLOY_KEY.test(key)) {
           secretValues.push(key);
           fail(
@@ -317,39 +361,62 @@ export async function runSetup(argv, deps) {
       missing.includes("VERCEL_ORG_ID") ||
       missing.includes("VERCEL_PROJECT_ID")
     ) {
+      const inspectArgs = ["project", "inspect", repo.name, "--json"];
+      let inspected = vercel(inspectArgs);
+      // `vercel link --yes --project` is documented for existing projects only, so create a missing one first.
+      if (inspected.status !== 0) {
+        plan(`Vercel: tworzę projekt „${repo.name}” (vercel project create).`);
+        if (!dryRun) {
+          must(
+            "Tworzenie projektu Vercel",
+            "npx",
+            vercelArgs(["project", "create", repo.name]),
+          );
+          inspected = must(
+            "Odczyt projektu Vercel",
+            "npx",
+            vercelArgs(inspectArgs),
+          );
+        }
+      }
+      const expectedProjectId = inspectedProjectId(inspected.stdout);
+
+      /** @param {string} text @returns {{ orgId?: string, projectId?: string }} */
+      const parseProjectJson = (text) => {
+        try {
+          return JSON.parse(text);
+        } catch {
+          return fail(
+            "Plik .vercel/project.json nie jest poprawnym JSON-em. Usuń katalog .vercel i uruchom ponownie.",
+          );
+        }
+      };
       const linked = deps.readFile(join(".vercel", "project.json"));
-      if (linked === null) {
+      if (
+        linked !== null &&
+        expectedProjectId !== null &&
+        parseProjectJson(linked).projectId === expectedProjectId
+      )
+        log("Vercel: .vercel/project.json wskazuje właściwy projekt.");
+      else {
         plan(
-          `Vercel: łączę katalog z projektem „${repo.name}” (vercel link --yes).`,
+          linked === null
+            ? `Vercel: łączę katalog z projektem „${repo.name}” (vercel link --yes).`
+            : `Vercel: .vercel/project.json nie pasuje do projektu „${repo.name}”, łączę ponownie.`,
         );
         if (!dryRun)
           must(
             "Vercel link",
             "npx",
-            [
-              "--yes",
-              `vercel@${vercelVersion}`,
-              "link",
-              "--yes",
-              "--project",
-              repo.name,
-            ],
+            vercelArgs(["link", "--yes", "--project", repo.name]),
             { interactive: true },
           );
-      } else log("Vercel: .vercel/project.json już istnieje, pomijam link.");
+      }
       if (!dryRun) {
         const projectJson = deps.readFile(join(".vercel", "project.json"));
         if (projectJson === null)
           fail("Brak .vercel/project.json po `vercel link`.");
-        /** @type {{ orgId?: string, projectId?: string }} */
-        let parsed = {};
-        try {
-          parsed = JSON.parse(/** @type {string} */ (projectJson));
-        } catch {
-          fail(
-            "Plik .vercel/project.json nie jest poprawnym JSON-em. Usuń katalog .vercel i uruchom ponownie.",
-          );
-        }
+        const parsed = parseProjectJson(/** @type {string} */ (projectJson));
         if (!parsed.orgId || !parsed.projectId)
           fail("W .vercel/project.json brakuje orgId lub projectId.");
         values.VERCEL_ORG_ID = String(parsed.orgId);
