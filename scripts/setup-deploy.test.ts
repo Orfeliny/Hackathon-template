@@ -50,6 +50,7 @@ interface World {
   tokenError?: string;
   inspectError?: string;
   agentNotFound?: boolean;
+  declineConvexProject?: boolean;
 }
 
 const AGENT_NOT_FOUND: Result = {
@@ -69,6 +70,7 @@ const AGENT_NOT_FOUND: Result = {
 function setup(world: World = {}, argv: string[] = ["--yes"]) {
   const calls: Call[] = [];
   const logs: string[] = [];
+  const questions: string[] = [];
   const files: Record<string, string> = {
     [".github/workflows/deploy.yml"]: DEPLOY_YML,
     ...world.files,
@@ -171,11 +173,17 @@ function setup(world: World = {}, argv: string[] = ["--yes"]) {
     calls,
     logs,
     files,
+    questions,
     exec: (args = argv) =>
       runSetup(args, {
         run,
         log: (l) => logs.push(l),
-        confirm: () => Promise.resolve(true),
+        confirm: (q) => {
+          questions.push(q);
+          return Promise.resolve(
+            !(world.declineConvexProject && q.startsWith("Użyć projektu")),
+          );
+        },
         readSecret: () => Promise.resolve(VERCEL_TOKEN),
         readFile: (p) => files[key(p)] ?? null,
         nodeVersion: world.nodeVersion ?? "v24.22.3",
@@ -346,13 +354,72 @@ describe("runSetup", () => {
           argv,
         );
         expect(await w.exec()).toBe(1);
-        expect(w.logs.join("\n")).toContain(`„${shown}”`);
-        expect(w.logs.join("\n")).toContain("convex dev --configure new");
+        const out = w.logs.join("\n");
+        expect(out).toContain(`„${shown}”`);
+        expect(out).toMatch(/bez --yes/);
+        expect(out).toContain("convex dev --configure new");
+        expect(w.questions.some((q) => q.startsWith("Użyć projektu"))).toBe(
+          false,
+        );
         expect(w.calls.some((c) => c.args.includes("token"))).toBe(false);
         expect(w.secretSets()).toEqual([]);
       }
     },
   );
+
+  const OTHER_ENV =
+    "CONVEX_DEPLOYMENT=dev:cool-fox-1 # team: t, project: my-hack-2";
+
+  it("asks before reusing a Convex project with another slug and mints a key on yes", async () => {
+    const w = setup(
+      {
+        files: {
+          ".env.local": OTHER_ENV,
+          ".vercel/project.json": PROJECT_JSON,
+        },
+      },
+      [],
+    );
+    expect(await w.exec()).toBe(0);
+    expect(w.questions).toContain(
+      "Użyć projektu Convex „my-hack-2” dla repozytorium „my-hack”?",
+    );
+    expect(w.calls.some((c) => c.args.includes("token"))).toBe(true);
+    expect(w.calls.some((c) => c.args.includes("--configure"))).toBe(false);
+  });
+
+  it("aborts without minting a key when the other Convex project is declined", async () => {
+    const w = setup(
+      {
+        declineConvexProject: true,
+        files: {
+          ".env.local": OTHER_ENV,
+          ".vercel/project.json": PROJECT_JSON,
+        },
+      },
+      [],
+    );
+    expect(await w.exec()).toBe(1);
+    expect(w.logs.join("\n")).toContain("„my-hack-2”");
+    expect(w.calls.some((c) => c.args.includes("token"))).toBe(false);
+    expect(w.secretSets()).toEqual([]);
+  });
+
+  it("does not ask about an undeterminable Convex project interactively", async () => {
+    const w = setup(
+      {
+        files: {
+          ".env.local": "CONVEX_DEPLOYMENT=dev:cool-fox-1",
+          ".vercel/project.json": PROJECT_JSON,
+        },
+      },
+      [],
+    );
+    expect(await w.exec()).toBe(1);
+    expect(w.logs.join("\n")).toContain("„nieznany”");
+    expect(w.questions.some((q) => q.startsWith("Użyć projektu"))).toBe(false);
+    expect(w.calls.some((c) => c.args.includes("token"))).toBe(false);
+  });
 
   it("dry-run plans everything and changes nothing", async () => {
     const w = setup({}, ["--dry-run", "--protect"]);

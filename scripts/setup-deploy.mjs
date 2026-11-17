@@ -319,11 +319,24 @@ export async function runSetup(argv, deps) {
       const envLocal = deps.readFile(".env.local");
       if (hasCloudDeployment(envLocal)) {
         const slug = convexProjectSlug(envLocal);
-        if (slug?.toLowerCase() !== repo.name.toLowerCase())
-          fail(
-            `.env.local wskazuje wdrożenie Convex z projektu „${slug ?? "nieznany"}”, a to repozytorium to „${repo.name}”. ` +
-              "Nie utworzę klucza produkcyjnego dla cudzego projektu. Uruchom `npx convex dev --configure new` albo przenieś .env.local i spróbuj ponownie.",
-          );
+        // The slug is assigned by the Convex server (slugified, maybe deduplicated), so it can
+        // differ from repo.name even for the project an earlier, interrupted run created.
+        if (slug?.toLowerCase() !== repo.name.toLowerCase()) {
+          const accepted =
+            slug !== null &&
+            !dryRun &&
+            !options.yes &&
+            (await deps.confirm(
+              `Użyć projektu Convex „${slug}” dla repozytorium „${repo.name}”?`,
+            ));
+          if (!accepted)
+            fail(
+              `.env.local wskazuje wdrożenie Convex z projektu „${slug ?? "nieznany"}”, a to repozytorium to „${repo.name}”. ` +
+                "Bez potwierdzenia nie utworzę dla niego klucza produkcyjnego. " +
+                "To może być Twój własny projekt (np. z wcześniejszego, przerwanego uruchomienia): uruchom skrypt ponownie bez --yes i --dry-run, żeby go potwierdzić. " +
+                "Jeśli to cudzy projekt, uruchom `npx convex dev --configure new` albo przenieś .env.local i spróbuj ponownie.",
+            );
+        }
       }
       if (!hasCloudDeployment(envLocal)) {
         plan(
