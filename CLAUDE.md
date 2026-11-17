@@ -4,6 +4,18 @@ Rules for AI agents (and humans) working in this repo. The design lives in
 [specs/starter-architecture.md](specs/starter-architecture.md); user-facing docs (Polish) are in `docs/`
 and the README. This file does not repeat them, it says what you must do and never do.
 
+## Docs
+
+- [README.md](README.md): setup and overview. [CONTRIBUTING.md](CONTRIBUTING.md): team rules.
+- [docs/architecture.md](docs/architecture.md): structure and how to add a feature.
+- [docs/development-workflow.md](docs/development-workflow.md): daily flow, lanes, hooks.
+- [docs/testing.md](docs/testing.md): test layers and commands.
+- [docs/ai-providers.md](docs/ai-providers.md): provider paths and env.
+- [docs/github-issues-workflow.md](docs/github-issues-workflow.md): issues, branches, PRs.
+- [docs/deployment.md](docs/deployment.md): Convex + Vercel deploy.
+- [docs/troubleshooting.md](docs/troubleshooting.md): common failures.
+- [SETUP_PROMPT.md](SETUP_PROMPT.md): first-run prompt for an agent.
+
 ## Overview
 
 A hackathon starter: Vite + React + TypeScript + Tailwind frontend, Convex backend, one example
@@ -26,7 +38,7 @@ PR titles/descriptions and this file stay in English. README and `docs/` are Pol
 - `src/features/<name>/feature.tsx`: default export self-registers the route. Everything for a feature lives here.
 - `convex/<name>/{tables,queries,mutations,actions}.ts`: backend of a feature; the generated API is `api.<name>.queries.*`.
 - `convex/ai/`: provider layer (`AIProvider` interface, mock, OpenAI-compatible adapter).
-- `src/app/`, `src/lib/`, `src/components/ui/`, `convex/lib/`: shared code (hot files, see below).
+- `src/app/`, `src/lib/`, `src/components/ui/`, `convex/lib/`, `convex/ai/`: shared code (hot files, full list in `.github/hot-files.txt`).
 - `scripts/`: lane, overlap, codegen-check, hot-files check. `.github/`: CI, deploy, hot-files list.
 
 ## Principles
@@ -59,6 +71,7 @@ say so instead of claiming it passed.
 - e2e: Playwright smoke in offline mode (`--mode e2e`, `.env.e2e`). Never export `VITE_CONVEX_URL`
   in the shell; the e2e run fails fast when it is set.
 - Tests never need network or a live model; stub `fetch` for AI adapters.
+- Details: [docs/testing.md](docs/testing.md).
 
 ## Convex
 
@@ -75,10 +88,12 @@ say so instead of claiming it passed.
   `mock` is the default and the demo safety net; keep it working.
 - Never put AI keys in `VITE_*` variables or `.env.local`. Keys go to Convex env only.
 - No automatic fallback between real providers; failures return typed errors and the UI stays usable.
+- Details: [docs/ai-providers.md](docs/ai-providers.md).
 
 ## Git and GitHub workflow
 
-- Task source is GitHub Issues: `gh issue view <n> --comments`. Use `gh` only; `gh auth login` is the only auth path.
+- Details: [docs/github-issues-workflow.md](docs/github-issues-workflow.md).
+- Task source is GitHub Issues: `gh issue view <n> --comments`. Acceptance criteria are the checklist in the issue body; when done, comment the result on the issue. Use `gh` only; `gh auth login` is the only auth path.
 - Branch: `feat|fix|chore/<n>-<slug>`. Never push to `main`; always branch + PR.
 - Every PR body contains `Closes #<n>`. Rebase on `origin/main` before opening a PR.
 - Never create or close issues, change labels/milestones, or assign issues to yourself without
