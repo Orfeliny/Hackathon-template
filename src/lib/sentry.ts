@@ -34,13 +34,20 @@ function filterQueryPair(match: string, sep: string, key: string): string {
   return isSensitiveKey(safeDecode(key)) ? `${sep}${key}=${FILTERED}` : match;
 }
 
+// Beyond this the regexes below can go super-linear on hostile input, and Sentry truncates long
+// values anyway. The tail is dropped, not passed through, so nothing unscrubbed survives.
+const MAX_INPUT = 8192;
+
 export function scrubUrl(url: string): string {
-  return url.replace(/([?&;#])([^=&#;]*)=([^&#;]*)/g, filterQueryPair);
+  return url
+    .slice(0, MAX_INPUT)
+    .replace(/([?&;#])([^=&#;?]*)=([^&#;]*)/g, filterQueryPair);
 }
 
 // In prose a pair ends at whitespace, so the words after a URL survive.
 // Covers absolute, relative and //host URLs and bare "a=1&b=2" strings alike.
-const QUERY_PAIR_IN_TEXT = /([?&;#])([^=&#;\s]*)=([^&#;\s]*)/g;
+// The key class excludes "?" so a run of "?" cannot be rescanned from every position.
+const QUERY_PAIR_IN_TEXT = /([?&;#])([^=&#;?\s]*)=([^&#;\s]*)/g;
 const BEARER = /\bBearer\s+\S+/gi;
 
 const SENSITIVE_ASSIGNMENT = new RegExp(
@@ -50,7 +57,8 @@ const SENSITIVE_ASSIGNMENT = new RegExp(
 
 // Error messages are free text: filter what can be recognised, and cut Convex validator
 // errors where they start echoing the rejected value ("Value: ...").
-export function scrubText(text: string): string {
+export function scrubText(input: string): string {
+  const text = input.slice(0, MAX_INPUT);
   const valueLine = text.search(/\r?\n\s*Value:/);
   const head = valueLine === -1 ? text : text.slice(0, valueLine);
   const scrubbed = head

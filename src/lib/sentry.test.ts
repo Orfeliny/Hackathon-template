@@ -115,6 +115,32 @@ describe("scrubUrl", () => {
   });
 });
 
+describe("hostile input", () => {
+  const inputs: [string, string][] = [
+    ["'?' x 100000", "?".repeat(100_000)],
+    ["'?a' x 50000", "?a".repeat(50_000)],
+    ["'token' x 10000", "token".repeat(10_000)],
+  ];
+
+  it.each(inputs)("scrubText stays fast on %s", (_name, input) => {
+    const start = performance.now();
+    scrubText(input);
+    expect(performance.now() - start).toBeLessThan(100);
+  });
+
+  it.each(inputs)("scrubUrl stays fast on %s", (_name, input) => {
+    const start = performance.now();
+    scrubUrl(input);
+    expect(performance.now() - start).toBeLessThan(100);
+  });
+
+  it("drops the tail beyond the cap instead of passing it through", () => {
+    const out = scrubText(`${"x".repeat(9000)} token=secret`);
+    expect(out).toHaveLength(8192);
+    expect(out).not.toContain("secret");
+  });
+});
+
 describe("scrubText", () => {
   it.each([
     [
