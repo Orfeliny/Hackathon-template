@@ -538,7 +538,9 @@ checks them and their `.test.ts` files under the same strict settings.
 - Trigger: `push` to `main` (and `workflow_dispatch`). `concurrency: deploy-production`, no cancel.
 - `verify`: `uses: ./.github/workflows/ci.yml`; the caller grants `contents: read` and
   `pull-requests: read`, because a called workflow cannot exceed the caller's permissions.
-- `deploy` (`needs: verify`, `environment: production`): 0. Secrets are scoped per step (`env:` on the step that needs them), never job-wide.
+- `deploy` (`needs: verify`, `environment: production`). Secrets are scoped per step (`env:` on
+  the step that needs them), never job-wide. Steps:
+
   1. Check that `CONVEX_DEPLOY_KEY`, `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` are set;
      if any is missing, write a notice to the job summary and stop with success (the starter must
      be green before anyone has accounts).
@@ -551,6 +553,7 @@ checks them and their `.test.ts` files under the same strict settings.
      injected `VITE_CONVEX_URL` beats a value pulled into `.vercel/.env.production.local` is not
      documented, so the pipeline checks the result instead of trusting it.
   5. `npx vercel@65.16.0 deploy --prebuilt --prod` [S18].
+
 - `VITE_CONVEX_URL` is **never** set in the Vercel project env; `docs/deployment.md` says so.
 - `vercel.json`: `{ "git": { "deploymentEnabled": false } }` so Vercel's Git integration does not
   deploy a second time [S18]. Vercel preview deploys are therefore off; documented how to turn them
