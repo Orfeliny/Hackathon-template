@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  convexProjectSlug,
   hasCloudDeployment,
+  nodeVersionSupported,
   parseArgs,
   parseGithubSlug,
   pinnedVercel,
@@ -24,6 +26,8 @@ const ok = (stdout = ""): Result => ({ status: 0, stdout, stderr: "" });
 const bad = (stderr = ""): Result => ({ status: 1, stdout: "", stderr });
 
 const DEPLOY_YML = "run: npx vercel@65.16.0 pull";
+const MATCHING_ENV =
+  "CONVEX_DEPLOYMENT=dev:cool-fox-1 # team: t, project: my-hack";
 const PROJECT_JSON = JSON.stringify({ orgId: "team_1", projectId: "prj_1" });
 
 interface World {
@@ -35,6 +39,7 @@ interface World {
   envExists?: boolean;
   rulesets?: string[];
   rulesetRefs?: string[];
+  nodeVersion?: string;
   origin?: string;
   files?: Record<string, string>;
   keyOutput?: string;
@@ -123,7 +128,9 @@ function setup(world: World = {}, argv: string[] = ["--yes"]) {
         return ok(
           JSON.stringify({
             conditions: {
-              ref_name: { include: world.rulesetRefs ?? ["refs/heads/main"] },
+              ref_name: {
+                include: world.rulesetRefs ?? ["refs/heads/main"],
+              },
             },
           }),
         );
@@ -171,7 +178,7 @@ function setup(world: World = {}, argv: string[] = ["--yes"]) {
         confirm: () => Promise.resolve(true),
         readSecret: () => Promise.resolve(VERCEL_TOKEN),
         readFile: (p) => files[key(p)] ?? null,
-        nodeVersion: "v24.22.3",
+        nodeVersion: world.nodeVersion ?? "v24.22.3",
       }),
     secretSets: () =>
       calls.filter(
@@ -243,6 +250,29 @@ describe("parseArgs and helpers", () => {
     expect(rulesetTargetsMain({})).toBe(false);
   });
 
+  it("matches ref globs in include and exclude", () => {
+    const targets = (include: string[], exclude: string[] = []) =>
+      rulesetTargetsMain({ conditions: { ref_name: { include, exclude } } });
+    expect(targets(["refs/heads/*"])).toBe(true);
+    expect(targets(["refs/heads/feat/*"])).toBe(false);
+    expect(targets(["~ALL"], ["refs/heads/ma*"])).toBe(false);
+    expect(targets(["refs/heads/*"], ["refs/heads/release/*"])).toBe(true);
+  });
+
+  it("accepts only Node >=24.15 and <25", () => {
+    expect(nodeVersionSupported("v24.14.0")).toBe(false);
+    expect(nodeVersionSupported("v24.15.0")).toBe(true);
+    expect(nodeVersionSupported("v24.22.3")).toBe(true);
+    expect(nodeVersionSupported("v25.0.0")).toBe(false);
+    expect(nodeVersionSupported("v22.20.0")).toBe(false);
+  });
+
+  it("reads the project slug convex writes next to CONVEX_DEPLOYMENT", () => {
+    expect(convexProjectSlug(MATCHING_ENV)).toBe("my-hack");
+    expect(convexProjectSlug("CONVEX_DEPLOYMENT=dev:x")).toBeNull();
+    expect(convexProjectSlug(null)).toBeNull();
+  });
+
   it("builds the ruleset from ARCH 10.3", () => {
     const payload = rulesetPayload();
     expect(payload.name).toBe(RULESET_NAME);
@@ -286,6 +316,44 @@ describe("runSetup", () => {
     expect(w.secretSets()).toEqual([]);
   });
 
+  it.each(["v24.14.0", "v25.0.0"])("rejects Node %s", async (nodeVersion) => {
+    const w = setup({ nodeVersion });
+    expect(await w.exec()).toBe(1);
+    expect(w.logs.join("\n")).toMatch(/Potrzebny Node 24/);
+    expect(w.calls).toEqual([]);
+  });
+
+  it("runs on Node 24.15.0", async () => {
+    const w = setup({
+      nodeVersion: "v24.15.0",
+      files: { ".vercel/project.json": PROJECT_JSON },
+    });
+    expect(await w.exec()).toBe(0);
+  });
+
+  it.each([
+    ["other project", "# team: t, project: other-hack", "other-hack"],
+    ["undeterminable", "", "nieznany"],
+  ])(
+    "aborts without minting a key when .env.local is %s",
+    async (_name, comment, shown) => {
+      const env = `CONVEX_DEPLOYMENT=dev:cool-fox-1 ${comment}`;
+      for (const argv of [["--yes"], ["--dry-run"]]) {
+        const w = setup(
+          {
+            files: { ".env.local": env, ".vercel/project.json": PROJECT_JSON },
+          },
+          argv,
+        );
+        expect(await w.exec()).toBe(1);
+        expect(w.logs.join("\n")).toContain(`„${shown}”`);
+        expect(w.logs.join("\n")).toContain("convex dev --configure new");
+        expect(w.calls.some((c) => c.args.includes("token"))).toBe(false);
+        expect(w.secretSets()).toEqual([]);
+      }
+    },
+  );
+
   it("dry-run plans everything and changes nothing", async () => {
     const w = setup({}, ["--dry-run", "--protect"]);
     expect(await w.exec()).toBe(0);
@@ -327,7 +395,7 @@ describe("runSetup", () => {
   it("skips Convex creation when .env.local already has a cloud deployment", async () => {
     const w = setup({
       files: {
-        ".env.local": "CONVEX_DEPLOYMENT=dev:cool-fox-1",
+        ".env.local": MATCHING_ENV,
         ".vercel/project.json": PROJECT_JSON,
       },
     });

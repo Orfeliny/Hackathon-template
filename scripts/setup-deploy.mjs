@@ -2,7 +2,7 @@
 // Vercel link, and the four `production` environment secrets in GitHub. See docs/deployment.md.
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import path, { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { CONVEX_BIN } from "./lib/proc.mjs";
@@ -84,8 +84,11 @@ export function parseGithubSlug(url) {
 export function rulesetTargetsMain(ruleset) {
   const { include = [], exclude = [] } = ruleset.conditions?.ref_name ?? {};
   const matchesMain = (/** @type {string[]} */ refs) =>
-    refs.some((ref) =>
-      ["~DEFAULT_BRANCH", "~ALL", "refs/heads/main"].includes(ref),
+    refs.some(
+      (ref) =>
+        ref === "~DEFAULT_BRANCH" ||
+        ref === "~ALL" ||
+        path.posix.matchesGlob("refs/heads/main", ref),
     );
   return matchesMain(include) && !matchesMain(exclude);
 }
@@ -158,6 +161,24 @@ export function hasCloudDeployment(envLocal) {
   return value !== "" && !/^(local|anonymous)[:-]/.test(value);
 }
 
+/** convex 1.50.0 writes `CONVEX_DEPLOYMENT=dev:<name> # team: <t>, project: <p>` (changesToEnvVarFile). */
+/** @param {string | null} envLocal @returns {string | null} */
+export function convexProjectSlug(envLocal) {
+  const line = envLocal
+    ?.split(/\r?\n/)
+    .find((l) => /^\s*CONVEX_DEPLOYMENT\s*=/.test(l));
+  return /#.*\bproject:\s*([^\s,]+)/.exec(line ?? "")?.[1] ?? null;
+}
+
+/** @param {string} version e.g. "v24.15.0" — matches package.json engines `>=24.15.0 <25` */
+export function nodeVersionSupported(version) {
+  const [major = 0, minor = 0] = version
+    .replace(/^v/, "")
+    .split(".")
+    .map(Number);
+  return major === 24 && minor >= 15;
+}
+
 /**
  * @param {string[]} argv
  * @param {Deps} deps
@@ -191,7 +212,7 @@ export async function runSetup(argv, deps) {
     const plan = (/** @type {string} */ line) =>
       log(dryRun ? `[dry-run] ${line}` : line);
 
-    if (Number(deps.nodeVersion.replace(/^v/, "").split(".")[0]) !== 24)
+    if (!nodeVersionSupported(deps.nodeVersion))
       fail(
         `Potrzebny Node 24 (jest ${deps.nodeVersion}). Uruchom \`fnm use\` albo \`nvm use\`.`,
       );
@@ -295,7 +316,16 @@ export async function runSetup(argv, deps) {
     const values = {};
 
     if (missing.includes("CONVEX_DEPLOY_KEY")) {
-      if (!hasCloudDeployment(deps.readFile(".env.local"))) {
+      const envLocal = deps.readFile(".env.local");
+      if (hasCloudDeployment(envLocal)) {
+        const slug = convexProjectSlug(envLocal);
+        if (slug?.toLowerCase() !== repo.name.toLowerCase())
+          fail(
+            `.env.local wskazuje wdrożenie Convex z projektu „${slug ?? "nieznany"}”, a to repozytorium to „${repo.name}”. ` +
+              "Nie utworzę klucza produkcyjnego dla cudzego projektu. Uruchom `npx convex dev --configure new` albo przenieś .env.local i spróbuj ponownie.",
+          );
+      }
+      if (!hasCloudDeployment(envLocal)) {
         plan(
           `Convex: tworzę projekt „${repo.name}” (npx convex dev --once --configure new).`,
         );
