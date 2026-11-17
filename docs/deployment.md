@@ -47,7 +47,7 @@ Wcześniej zaloguj się w trzech narzędziach: `gh auth login`, `npx convex logi
 
 Klucze i token żyją wyłącznie w pamięci i trafiają do `gh secret set` przez stdin: nie ma ich w argumentach, logach, plikach ani komunikatach błędów. Każdy krok pomija się, jeśli jest już zrobiony, więc komendę można uruchomić ponownie. `--yes` wyłącza pytanie o potwierdzenie. Skrypt niczego nie wdraża: pierwszy deploy uruchomisz sam (`gh workflow run deploy.yml`, podgląd `gh run watch`). Zmienne backendu ustaw osobno, np. `npx convex env set AI_PROVIDER mock --prod`.
 
-Repozytorium-szablon nie ma sekretów i nie powinno ich mieć: jego job `deploy` kończy się zielono z komunikatem „Deploy skipped”. Sekrety dostaje dopiero kopia utworzona z szablonu. Ruleset z `--protect` wymaga repozytorium publicznego albo organizacji (ograniczenia w sekcji „Plany darmowe”); reguł na poziomie organizacji skrypt nie zakłada.
+Repozytorium-szablon nie ma sekretów i nie powinno ich mieć: jego job `deploy` kończy się zielono z komunikatem „Deploy skipped”. Sekrety dostaje dopiero kopia utworzona z szablonu. Ruleset z `--protect` zawiera merge queue, a ta według sekcji „Plany darmowe” wymaga repozytorium należącego do organizacji. Strony GitHuba o kolejce nie podają tego wprost, więc na koncie osobistym `--protect` może się skończyć błędem 422 (skrypt podpowie wtedy ręczną konfigurację). Ruleset, który już obejmuje `main`, skrypt zostawia w spokoju; reguł na poziomie organizacji nie zakłada.
 
 Poniższa lista to ścieżka ręczna, na wypadek gdyby skrypt nie zadziałał.
 

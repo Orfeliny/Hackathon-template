@@ -25,7 +25,7 @@ To repozytorium jest szablonem GitHuba. Na każdy hackathon zakładasz własną 
 
 1. Na stronie repozytorium kliknij **Use this template**, utwórz nowe repozytorium i sklonuj je.
 2. `npm ci`, potem `npm run dev:frontend`. Całość działa lokalnie z mockiem AI, bez żadnego konta.
-3. Gdy potrzebujesz publicznego adresu: `npm run setup:deploy`. Skrypt zakłada projekt Convex i Vercel, a cztery sekrety wdrożeniowe wpisuje do środowiska `production` w GitHubie. Zajmuje to kilka minut. Zanim ruszysz, zaloguj się: `gh auth login`, `npx convex login`, `npx vercel login`. Sam szablon nigdy nie dostaje sekretów, więc skrypt się na nim zatrzyma.
+3. Gdy potrzebujesz publicznego adresu: `npm run setup:deploy`. Skrypt zakłada projekt Convex i Vercel, a cztery sekrety wdrożeniowe wpisuje do środowiska `production` w GitHubie. Zajmuje to kilka minut. Zanim ruszysz, zaloguj się: `gh auth login`, `npx convex login`, `npx vercel@65.16.0 login`. Sam szablon nigdy nie dostaje sekretów, więc skrypt się na nim zatrzyma.
 
 Podgląd planu bez zmian: `npm run setup:deploy -- --dry-run`. Szczegóły w [docs/deployment.md](docs/deployment.md).
 

@@ -2,7 +2,7 @@
 // Vercel link, and the four `production` environment secrets in GitHub. See docs/deployment.md.
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { CONVEX_BIN } from "./lib/proc.mjs";
@@ -65,9 +65,24 @@ export function rulesetPayload() {
 
 class SetupError extends Error {}
 
+/** @param {string} url @returns {string | null} owner/name of a GitHub remote URL */
+export function parseGithubSlug(url) {
+  const match = /github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/.exec(url);
+  return match ? `${match[1]}/${match[2]}` : null;
+}
+
+/** @param {{ conditions?: { ref_name?: { include?: string[] } } }} ruleset */
+export function rulesetTargetsMain(ruleset) {
+  const include = ruleset.conditions?.ref_name?.include ?? [];
+  return include.some((ref) =>
+    ["~DEFAULT_BRANCH", "~ALL", "refs/heads/main"].includes(ref),
+  );
+}
+
 /**
  * @typedef {{ status: number, stdout: string, stderr: string }} RunResult
- * @typedef {(command: string, args: string[], options?: { input?: string }) => RunResult} Run
+ * @typedef {{ input?: string, interactive?: boolean }} RunOptions
+ * @typedef {(command: string, args: string[], options?: RunOptions) => RunResult} Run
  * @typedef {{
  *   run: Run,
  *   log: (line: string) => void,
@@ -134,12 +149,12 @@ export async function runSetup(argv, deps) {
   const fail = (/** @type {string} */ message) => {
     throw new SetupError(scrub(message));
   };
-  /** @type {(label: string, command: string, args: string[], options?: { input?: string }) => RunResult} */
-  const must = (label, command, args, options) => {
+  /** @type {(label: string, command: string, args: string[], options?: RunOptions, hint?: string) => RunResult} */
+  const must = (label, command, args, options, hint) => {
     const result = run(command, args, options);
     if (result.status !== 0)
       fail(
-        `${label} nie powiodło się: ${result.stderr.trim() || "brak komunikatu"}`,
+        `${label} nie powiodło się: ${result.stderr.trim() || "brak komunikatu"}${hint ? `\n${hint}` : ""}`,
       );
     return result;
   };
@@ -160,9 +175,18 @@ export async function runSetup(argv, deps) {
         "GitHub CLI nie jest zalogowany. Uruchom `gh auth login` i spróbuj ponownie.",
       );
 
+    const origin = must("`git remote get-url origin`", "git", [
+      "remote",
+      "get-url",
+      "origin",
+    ]).stdout.trim();
+    const slug = parseGithubSlug(origin);
+    if (!slug)
+      fail(`Remote origin (${origin}) nie wskazuje na repozytorium GitHuba.`);
     const repoInfo = must("`gh repo view`", "gh", [
       "repo",
       "view",
+      String(slug),
       "--json",
       "isTemplate,name,nameWithOwner",
     ]);
@@ -185,7 +209,7 @@ export async function runSetup(argv, deps) {
     if (deployYml === null) fail("Brak .github/workflows/deploy.yml.");
     const vercelVersion = pinnedVercel(/** @type {string} */ (deployYml));
     const vercel = (/** @type {string[]} */ args) =>
-      run("npx", [`vercel@${vercelVersion}`, ...args]);
+      run("npx", ["--yes", `vercel@${vercelVersion}`, ...args]);
     if (vercel(["whoami"]).status !== 0)
       fail(
         "Vercel: brak logowania. Uruchom `npx vercel@" +
@@ -193,17 +217,24 @@ export async function runSetup(argv, deps) {
           " login` i spróbuj ponownie.",
       );
 
+    const envPath = `repos/${repo.nameWithOwner}/environments/${ENVIRONMENT}`;
+    const envExists = run("gh", ["api", envPath]).status === 0;
+    // Environments are not copied from a template, and listing the secrets of a missing one is a 404.
     const existing = new Set(
-      JSON.parse(
-        must("`gh secret list`", "gh", [
-          "secret",
-          "list",
-          "--env",
-          ENVIRONMENT,
-          "--json",
-          "name",
-        ]).stdout || "[]",
-      ).map((/** @type {{ name: string }} */ s) => s.name),
+      envExists
+        ? JSON.parse(
+            must("`gh secret list`", "gh", [
+              "secret",
+              "list",
+              "--env",
+              ENVIRONMENT,
+              "--repo",
+              repo.nameWithOwner,
+              "--json",
+              "name",
+            ]).stdout || "[]",
+          ).map((/** @type {{ name: string }} */ s) => s.name)
+        : [],
     );
     const missing = SECRETS.filter((name) => !existing.has(name));
 
@@ -233,17 +264,22 @@ export async function runSetup(argv, deps) {
           `Convex: tworzę projekt „${repo.name}” (npx convex dev --once --configure new).`,
         );
         if (!dryRun)
-          must("Konfiguracja Convex", process.execPath, [
-            CONVEX_BIN,
-            "dev",
-            "--once",
-            "--configure",
-            "new",
-            "--project",
-            repo.name,
-            "--dev-deployment",
-            "cloud",
-          ]);
+          must(
+            "Konfiguracja Convex",
+            process.execPath,
+            [
+              CONVEX_BIN,
+              "dev",
+              "--once",
+              "--configure",
+              "new",
+              "--project",
+              repo.name,
+              "--dev-deployment",
+              "cloud",
+            ],
+            { interactive: true },
+          );
       } else
         log(
           "Convex: .env.local ma już wdrożenie w chmurze, pomijam tworzenie projektu.",
@@ -252,14 +288,20 @@ export async function runSetup(argv, deps) {
         "Convex: tworzę produkcyjny klucz wdrożeniowy (nie jest wypisywany ani zapisywany).",
       );
       if (!dryRun) {
-        const key = must("Tworzenie klucza Convex", process.execPath, [
-          CONVEX_BIN,
-          "deployment",
-          "token",
-          "create",
-          "github-actions",
-          "--prod",
-        ]).stdout.trim();
+        const key = must(
+          "Tworzenie klucza Convex",
+          process.execPath,
+          [
+            CONVEX_BIN,
+            "deployment",
+            "token",
+            "create",
+            "github-actions",
+            "--prod",
+          ],
+          undefined,
+          "Jeśli brakuje deploymentu produkcyjnego (nie sprawdzone na żywym koncie): `npx convex deployment create --type prod --default` albo utwórz go w panelu Convex.",
+        ).stdout.trim();
         if (!DEPLOY_KEY.test(key)) {
           secretValues.push(key);
           fail(
@@ -281,25 +323,37 @@ export async function runSetup(argv, deps) {
           `Vercel: łączę katalog z projektem „${repo.name}” (vercel link --yes).`,
         );
         if (!dryRun)
-          must("Vercel link", "npx", [
-            `vercel@${vercelVersion}`,
-            "link",
-            "--yes",
-            "--project",
-            repo.name,
-          ]);
+          must(
+            "Vercel link",
+            "npx",
+            [
+              "--yes",
+              `vercel@${vercelVersion}`,
+              "link",
+              "--yes",
+              "--project",
+              repo.name,
+            ],
+            { interactive: true },
+          );
       } else log("Vercel: .vercel/project.json już istnieje, pomijam link.");
       if (!dryRun) {
         const projectJson = deps.readFile(join(".vercel", "project.json"));
         if (projectJson === null)
           fail("Brak .vercel/project.json po `vercel link`.");
-        const { orgId, projectId } = JSON.parse(
-          /** @type {string} */ (projectJson),
-        );
-        if (!orgId || !projectId)
+        /** @type {{ orgId?: string, projectId?: string }} */
+        let parsed = {};
+        try {
+          parsed = JSON.parse(/** @type {string} */ (projectJson));
+        } catch {
+          fail(
+            "Plik .vercel/project.json nie jest poprawnym JSON-em. Usuń katalog .vercel i uruchom ponownie.",
+          );
+        }
+        if (!parsed.orgId || !parsed.projectId)
           fail("W .vercel/project.json brakuje orgId lub projectId.");
-        values.VERCEL_ORG_ID = orgId;
-        values.VERCEL_PROJECT_ID = projectId;
+        values.VERCEL_ORG_ID = String(parsed.orgId);
+        values.VERCEL_PROJECT_ID = String(parsed.projectId);
       }
     }
 
@@ -309,28 +363,27 @@ export async function runSetup(argv, deps) {
         log(
           "Token Vercel utworzysz na vercel.com → Account Settings → Tokens (scope: Twój zespół, bez wygaśnięcia lub na czas hackathonu).",
         );
-        const token = (await deps.readSecret("VERCEL_TOKEN: ")).trim();
+        let token = "";
+        try {
+          token = (await deps.readSecret("VERCEL_TOKEN: ")).trim();
+        } catch (error) {
+          fail(
+            error instanceof Error
+              ? error.message
+              : "Nie udało się odczytać tokenu.",
+          );
+        }
         if (!token) fail("Pusty token Vercel.");
         secretValues.push(token);
         values.VERCEL_TOKEN = token;
       }
     }
 
-    const envExists =
-      run("gh", [
-        "api",
-        `repos/${repo.nameWithOwner}/environments/${ENVIRONMENT}`,
-      ]).status === 0;
     if (envExists) log(`GitHub: środowisko ${ENVIRONMENT} już istnieje.`);
     else {
       plan(`GitHub: tworzę środowisko ${ENVIRONMENT}.`);
       if (!dryRun)
-        must("Tworzenie środowiska", "gh", [
-          "api",
-          "--method",
-          "PUT",
-          `repos/${repo.nameWithOwner}/environments/${ENVIRONMENT}`,
-        ]);
+        must("Tworzenie środowiska", "gh", ["api", "--method", "PUT", envPath]);
     }
 
     for (const name of missing) {
@@ -360,12 +413,17 @@ export async function runSetup(argv, deps) {
       const listed = JSON.parse(
         must("Lista rulesetów", "gh", ["api", rulesetsPath]).stdout || "[]",
       );
-      if (
-        listed.some(
-          (/** @type {{ name: string }} */ r) => r.name === RULESET_NAME,
-        )
-      )
-        log("GitHub: ruleset dla main już istnieje, pomijam.");
+      let targetsMain = false;
+      for (const r of listed) {
+        if (r.target !== "branch" || r.enforcement !== "active") continue;
+        const detail = JSON.parse(
+          must("Odczyt rulesetu", "gh", ["api", `${rulesetsPath}/${r.id}`])
+            .stdout || "{}",
+        );
+        if (rulesetTargetsMain(detail)) targetsMain = true;
+      }
+      if (targetsMain)
+        log("GitHub: aktywny ruleset dla main już istnieje, pomijam.");
       else {
         plan(
           "GitHub: tworzę ruleset dla main (gate, merge queue, tylko squash, bez force push).",
@@ -376,6 +434,7 @@ export async function runSetup(argv, deps) {
             "gh",
             ["api", "--method", "POST", rulesetsPath, "--input", "-"],
             { input: JSON.stringify(rulesetPayload()) },
+            "Kod 422 zwykle oznacza, że repozytorium nie obsługuje merge queue (patrz docs/deployment.md). Ochronę ustawisz wtedy ręcznie w Settings > Rules.",
           );
       }
     } else
@@ -396,21 +455,38 @@ export async function runSetup(argv, deps) {
   }
 }
 
+/** npm's own npx entry point next to the running node (no shell needed), or null when absent. */
+function npxCli() {
+  const dir = dirname(process.execPath);
+  return (
+    [
+      join(dir, "node_modules", "npm", "bin", "npx-cli.js"),
+      join(dir, "..", "lib", "node_modules", "npm", "bin", "npx-cli.js"),
+    ].find((p) => existsSync(p)) ?? null
+  );
+}
+
 /** @returns {Run} */
 function systemRun() {
+  const cli = npxCli();
+  if (cli === null && process.platform === "win32")
+    console.warn("Nie znaleziono npx-cli.js, npx uruchomię przez powłokę.");
   return (command, args, options) => {
-    const result = spawnSync(command, args, {
-      encoding: "utf8",
-      input: options?.input,
-      maxBuffer: 64 * 1024 * 1024,
-      // npx is a .cmd shim on Windows; its arguments are fixed, validated strings
-      shell: command === "npx" && process.platform === "win32",
-      stdio: [
-        options?.input === undefined ? "inherit" : "pipe",
-        "pipe",
-        "pipe",
-      ],
-    });
+    const viaNode = command === "npx" && cli !== null;
+    const result = spawnSync(
+      viaNode ? process.execPath : command,
+      viaNode ? [String(cli), ...args] : args,
+      {
+        encoding: "utf8",
+        input: options?.input,
+        maxBuffer: 64 * 1024 * 1024,
+        // fallback only: npx is a .cmd shim on Windows; its arguments are fixed, validated strings
+        shell: command === "npx" && !viaNode && process.platform === "win32",
+        stdio: options?.interactive
+          ? "inherit"
+          : [options?.input === undefined ? "inherit" : "pipe", "pipe", "pipe"],
+      },
+    );
     if (result.error)
       return { status: 127, stdout: "", stderr: result.error.message };
     return {

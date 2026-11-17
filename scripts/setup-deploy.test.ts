@@ -2,13 +2,19 @@ import { describe, expect, it } from "vitest";
 import {
   hasCloudDeployment,
   parseArgs,
+  parseGithubSlug,
   pinnedVercel,
   RULESET_NAME,
   rulesetPayload,
   runSetup,
 } from "./setup-deploy.mjs";
 
-type Call = { command: string; args: string[]; input?: string };
+type Call = {
+  command: string;
+  args: string[];
+  input?: string;
+  interactive?: boolean;
+};
 type Result = { status: number; stdout: string; stderr: string };
 
 const DEPLOY_KEY = "prod:happy-otter-123|SUPERSECRETKEYVALUE";
@@ -27,6 +33,8 @@ interface World {
   secrets?: string[];
   envExists?: boolean;
   rulesets?: string[];
+  rulesetRefs?: string[];
+  origin?: string;
   files?: Record<string, string>;
   keyOutput?: string;
   failSecretSet?: boolean;
@@ -44,14 +52,22 @@ function setup(world: World = {}, argv: string[] = ["--yes"]) {
   const run = (
     command: string,
     args: string[],
-    options?: { input?: string },
+    options?: { input?: string; interactive?: boolean },
   ) => {
-    calls.push({ command, args, input: options?.input });
+    calls.push({
+      command,
+      args,
+      input: options?.input,
+      interactive: options?.interactive,
+    });
     const line = args.join(" ");
+    if (command === "git")
+      return ok(`${world.origin ?? "https://github.com/team/my-hack.git"}
+`);
     if (command === "gh") {
       if (line.startsWith("auth status"))
         return world.ghLoggedIn === false ? bad("not logged in") : ok();
-      if (line.startsWith("repo view"))
+      if (line.startsWith("repo view team/my-hack "))
         return ok(
           JSON.stringify({
             isTemplate: world.isTemplate ?? false,
@@ -60,15 +76,30 @@ function setup(world: World = {}, argv: string[] = ["--yes"]) {
           }),
         );
       if (line.startsWith("secret list"))
-        return ok(
-          JSON.stringify((world.secrets ?? []).map((name) => ({ name }))),
-        );
+        return !world.envExists
+          ? bad("HTTP 404: Not Found")
+          : ok(JSON.stringify((world.secrets ?? []).map((name) => ({ name }))));
       if (line === "api repos/team/my-hack/environments/production")
         return world.envExists ? ok("{}") : bad("404");
       if (line.includes("--method PUT")) return ok();
       if (line === "api repos/team/my-hack/rulesets")
         return ok(
-          JSON.stringify((world.rulesets ?? []).map((name) => ({ name }))),
+          JSON.stringify(
+            (world.rulesets ?? []).map((name, i) => ({
+              id: i + 1,
+              name,
+              target: "branch",
+              enforcement: "active",
+            })),
+          ),
+        );
+      if (line.startsWith("api repos/team/my-hack/rulesets/"))
+        return ok(
+          JSON.stringify({
+            conditions: {
+              ref_name: { include: world.rulesetRefs ?? ["refs/heads/main"] },
+            },
+          }),
         );
       if (line.includes("--method POST")) return ok();
       if (line.startsWith("secret set"))
@@ -287,6 +318,76 @@ describe("runSetup", () => {
     await plain.exec();
     expect(plain.calls.some((c) => c.args.includes("POST"))).toBe(false);
     expect(plain.logs.join("\n")).toMatch(/setup:deploy -- --protect/);
+  });
+
+  it("skips --protect for any active ruleset on main, even one made by hand", async () => {
+    const w = setup(
+      {
+        rulesets: ["my own rules"],
+        rulesetRefs: ["~DEFAULT_BRANCH"],
+        files: { ".vercel/project.json": PROJECT_JSON },
+      },
+      ["--yes", "--protect"],
+    );
+    expect(await w.exec()).toBe(0);
+    expect(w.calls.some((c) => c.args.includes("POST"))).toBe(false);
+
+    const other = setup(
+      {
+        rulesets: ["tags only"],
+        rulesetRefs: ["refs/heads/release"],
+        files: { ".vercel/project.json": PROJECT_JSON },
+      },
+      ["--yes", "--protect"],
+    );
+    await other.exec();
+    expect(other.calls.some((c) => c.args.includes("POST"))).toBe(true);
+  });
+
+  it("on a fresh repo without the environment treats all secrets as missing and never lists them", async () => {
+    const w = setup({ files: { ".vercel/project.json": PROJECT_JSON } });
+    expect(await w.exec()).toBe(0);
+    expect(
+      w.calls.some((c) => c.args[0] === "secret" && c.args[1] === "list"),
+    ).toBe(false);
+    expect(w.calls.some((c) => c.args.includes("PUT"))).toBe(true);
+    expect(w.secretSets()).toHaveLength(4);
+    const dry = setup({}, ["--dry-run"]);
+    expect(await dry.exec()).toBe(0);
+    expect(dry.logs.join(" ")).toMatch(/Brakujące sekrety: CONVEX_DEPLOY_KEY/);
+  });
+
+  it("runs the interactive steps with inherited stdio and npx with --yes and the pinned version", async () => {
+    const w = setup();
+    await w.exec();
+    const configure = w.calls.find((c) => c.args.includes("--configure"));
+    const link = w.calls.find((c) => c.args.includes("link"));
+    expect(configure?.interactive).toBe(true);
+    expect(link?.interactive).toBe(true);
+    expect(link?.args.slice(0, 2)).toEqual(["--yes", "vercel@65.16.0"]);
+    for (const c of w.calls.filter((c) => c.command === "npx"))
+      expect(c.args.slice(0, 2)).toEqual(["--yes", "vercel@65.16.0"]);
+    const token = w.calls.find((c) => c.args.includes("token"));
+    expect(token?.interactive).toBeUndefined();
+  });
+
+  it("derives the repo from origin and rejects non-GitHub remotes", async () => {
+    expect(parseGithubSlug("git@github.com:team/my-hack.git")).toBe(
+      "team/my-hack",
+    );
+    expect(parseGithubSlug("https://github.com/team/my-hack")).toBe(
+      "team/my-hack",
+    );
+    expect(parseGithubSlug("https://gitlab.com/team/x.git")).toBeNull();
+    const w = setup({ origin: "https://gitlab.com/team/x.git" });
+    expect(await w.exec()).toBe(1);
+    expect(w.logs.join(" ")).toMatch(/nie wskazuje na repozytorium GitHuba/);
+  });
+
+  it("routes a bad project.json and a failed token prompt through the normal error path", async () => {
+    const bad1 = setup({ files: { ".vercel/project.json": "{nope" } });
+    expect(await bad1.exec()).toBe(1);
+    expect(bad1.logs.join(" ")).toMatch(/Błąd: Plik \.vercel\/project\.json/);
   });
 
   it("scrubs secrets from errors", async () => {
