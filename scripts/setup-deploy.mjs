@@ -90,6 +90,10 @@ export function rulesetTargetsMain(ruleset) {
   return matchesMain(include) && !matchesMain(exclude);
 }
 
+// vercel@65.16.0 prints `Project not found: <name>` or `Project "<name>" was not found ...` (agent mode: reason not_found).
+const PROJECT_NOT_FOUND =
+  /project not found|was not found|"reason":\s*"not_found"/i;
+
 /** @param {string} stdout @returns {string | null} project id from `vercel project inspect --json` */
 function inspectedProjectId(stdout) {
   try {
@@ -327,24 +331,15 @@ export async function runSetup(argv, deps) {
           "github-actions",
           "--prod",
         ];
-        // `convex dev --configure new` provisions only the dev deployment (createProject in cli.bundle.cjs),
-        // so a fresh project has no prod one until it is created here.
-        let tokenResult = run(process.execPath, tokenArgs);
-        if (tokenResult.status !== 0) {
-          log("Convex: tworzę wdrożenie produkcyjne (deployment create).");
-          must(
-            "Tworzenie wdrożenia produkcyjnego Convex",
-            process.execPath,
-            [CONVEX_BIN, "deployment", "create", "--type", "prod", "--default"],
-            { interactive: true },
-            "Możesz też utworzyć wdrożenie produkcyjne w panelu Convex.",
-          );
-          tokenResult = must(
-            "Tworzenie klucza Convex",
-            process.execPath,
-            tokenArgs,
-          );
-        }
+        // Never auto-create the prod deployment: `--default` on a project that already has one could
+        // repoint CI at an empty deployment, and a failure here is usually not "prod is missing".
+        const tokenResult = must(
+          "Tworzenie klucza Convex",
+          process.execPath,
+          tokenArgs,
+          undefined,
+          "Jeśli projekt nie ma jeszcze wdrożenia produkcyjnego, utwórz je ręcznie (npx convex deployment create --type prod --default) albo w panelu Convex i uruchom skrypt ponownie. Nie sprawdzone na żywym koncie.",
+        );
         const key = tokenResult.stdout.trim();
         if (!DEPLOY_KEY.test(key)) {
           secretValues.push(key);
@@ -365,6 +360,10 @@ export async function runSetup(argv, deps) {
       let inspected = vercel(inspectArgs);
       // `vercel link --yes --project` is documented for existing projects only, so create a missing one first.
       if (inspected.status !== 0) {
+        if (!PROJECT_NOT_FOUND.test(`${inspected.stdout}\n${inspected.stderr}`))
+          fail(
+            `Odczyt projektu Vercel nie powiódł się: ${inspected.stderr.trim() || inspected.stdout.trim() || "brak komunikatu"}`,
+          );
         plan(`Vercel: tworzę projekt „${repo.name}” (vercel project create).`);
         if (!dryRun) {
           must(

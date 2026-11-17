@@ -42,7 +42,8 @@ interface World {
   envProbeError?: string;
   vercelProjectExists?: boolean;
   vercelProjectId?: string;
-  prodMissing?: boolean;
+  tokenError?: string;
+  inspectError?: string;
 }
 
 function setup(world: World = {}, argv: string[] = ["--yes"]) {
@@ -54,7 +55,6 @@ function setup(world: World = {}, argv: string[] = ["--yes"]) {
   };
   const key = (p: string) => p.replaceAll("\\", "/");
   let projectCreated = false;
-  let prodCreated = false;
 
   const run = (
     command: string,
@@ -123,9 +123,11 @@ function setup(world: World = {}, argv: string[] = ["--yes"]) {
     if (command === "npx" && line.endsWith("whoami"))
       return world.vercelLoggedIn === false ? bad("no") : ok("me");
     if (command === "npx" && line.includes("project inspect"))
-      return world.vercelProjectExists === false && !projectCreated
-        ? bad("Error: project not found")
-        : ok(JSON.stringify({ id: world.vercelProjectId ?? "prj_1" }));
+      return world.inspectError
+        ? bad(world.inspectError)
+        : world.vercelProjectExists === false && !projectCreated
+          ? bad("Error: Project not found: my-hack")
+          : ok(JSON.stringify({ id: world.vercelProjectId ?? "prj_1" }));
     if (command === "npx" && line.includes(" link ")) {
       files[key(".vercel/project.json")] ??= PROJECT_JSON;
       return ok();
@@ -134,13 +136,9 @@ function setup(world: World = {}, argv: string[] = ["--yes"]) {
       projectCreated = true;
       return ok();
     }
-    if (line.includes("deployment create")) {
-      prodCreated = true;
-      return ok();
-    }
     if (line.includes("token create"))
-      return world.prodMissing && !prodCreated
-        ? bad("no production deployment")
+      return world.tokenError
+        ? bad(world.tokenError)
         : ok(`${world.keyOutput ?? DEPLOY_KEY}\n`);
     return ok();
   };
@@ -479,25 +477,21 @@ describe("runSetup", () => {
     }
   });
 
-  it("creates the Convex prod deployment when the key cannot be created, and retries", async () => {
+  it("shows the original token-create error with a hint and never creates a prod deployment", async () => {
     const w = setup({
-      prodMissing: true,
+      tokenError: "getaddrinfo ENOTFOUND api.convex.dev",
       files: { ".vercel/project.json": PROJECT_JSON },
     });
-    expect(await w.exec()).toBe(0);
-    const names = w.calls.map((c) => c.args.join(" "));
-    const create = names.findIndex((l) => l.includes("deployment create"));
-    expect(names[create]).toContain("--type prod --default");
-    expect(names.filter((l) => l.includes("token create"))).toHaveLength(2);
-    expect(names.findIndex((l) => l.includes("token create"))).toBeLessThan(
-      create,
-    );
-
-    const healthy = setup({ files: { ".vercel/project.json": PROJECT_JSON } });
-    await healthy.exec();
+    expect(await w.exec()).toBe(1);
+    const out = w.logs.join("\n");
+    expect(out).toContain("getaddrinfo ENOTFOUND api.convex.dev");
+    expect(out).toContain("npx convex deployment create --type prod --default");
     expect(
-      healthy.calls.some((c) => c.args.join(" ").includes("deployment create")),
+      w.calls.some((c) => c.args.join(" ").includes("deployment create")),
     ).toBe(false);
+    expect(w.calls.some((c) => c.args.join(" ").includes("secret set"))).toBe(
+      false,
+    );
   });
 
   it("creates a missing Vercel project before linking, and only when absent", async () => {
@@ -513,6 +507,13 @@ describe("runSetup", () => {
     await present.exec();
     expect(
       present.calls.some((c) => c.args.join(" ").includes("project create")),
+    ).toBe(false);
+
+    const broken = setup({ inspectError: "Error: fetch failed (ECONNRESET)" });
+    expect(await broken.exec()).toBe(1);
+    expect(broken.logs.join("\n")).toContain("ECONNRESET");
+    expect(
+      broken.calls.some((c) => c.args.join(" ").includes("project create")),
     ).toBe(false);
 
     const dry = setup({ vercelProjectExists: false }, ["--dry-run"]);
