@@ -35,7 +35,9 @@ comment first (see "Changing the architecture" in `CLAUDE.md`).
 4. **Identify existing infrastructure.** State what is already working and reusable: Convex
    backend, deploy to Vercel, `mock` and `openai-compatible` AI providers, `npm run seed`, lanes
    (`npm run lane:new`), CI, `npm run verify`. Check whether a Convex deployment is configured
-   (`npx convex dev --once`) and say what is missing.
+   with `npm run codegen:check` or by asking the human, and say what is missing. Never run
+   `npx convex dev --once` as a check (without a login it starts the interactive flow); use
+   `CONVEX_AGENT_MODE=anonymous npx convex dev --once` only to create a local backend.
 5. **Write the initial product spec.** Create `specs/<product>.md`: problem, user, scope,
    out of scope, assumptions, and acceptance criteria. One page.
 6. **Propose a simple architecture.** Describe the new features as folders on top of the starter:
@@ -79,8 +81,10 @@ Plan the demo from the start, not at hour 22.
   (`npx convex env set AI_PROVIDER mock`). If Bielik / PLLuM is unreachable, switch to `mock` and
   keep demoing. There is no automatic fallback between real providers; the switch is a decision
   you make.
-- **Last resort.** Offline mode (the e2e setup, `.env.e2e`) runs without network or a live
-  model. Know how to start it before the demo.
+- **Fallbacks.** Besides `AI_PROVIDER=mock`, keep a local anonymous backend
+  (`CONVEX_AGENT_MODE=anonymous npx convex dev --once`, then `npm run seed`) ready for the demo.
+  Offline mode (`.env.e2e`) only proves the page still loads: adding notes and summarizing are
+  disabled there, so it is not a demo.
 
 ## Commands
 

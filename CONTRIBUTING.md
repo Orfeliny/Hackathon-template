@@ -44,7 +44,7 @@ Przykład: `feat(notes): add summarize button`. Zmiana pliku wspólnego dostaje 
    `lint`, `typecheck`, `test:coverage`, `build` i `test:e2e`. To ten sam zestaw, który odpala CI.
 4. Jeszcze raz `npm run overlap`, potem otwórz PR. Treść PR zawiera `Closes #<nr>`, krótkie
    podsumowanie i opis, jak to przetestowano. Użyj szablonu PR.
-5. Poczekaj na zielony check `gate`, uzyskaj recenzję (niżej) i scal PR przez kolejkę.
+5. Poczekaj na zielony check `gate`, uzyskaj recenzję (niżej) i scal PR (jeśli repo jest w organizacji i kolejka jest włączona, przez kolejkę).
 
 Po angielsku piszemy kod, komentarze, commity oraz tytuły i opisy PR. Po polsku są README,
 `docs/`, `CONTRIBUTING.md` i szablony PR oraz issue.

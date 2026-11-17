@@ -24,7 +24,7 @@ Wymagany jest Node 24 (`.nvmrc`) i npm. Yarn i pnpm nie są wspierane (`engine-s
 ```bash
 npm ci
 npx playwright install chromium   # raz, dla testów e2e
-npm run dev:frontend              # sam frontend, w trybie offline, bez konta Convex
+npm run dev:frontend              # sam Vite; offline, dopóki .env.local nie ma VITE_CONVEX_URL
 npm run dev                       # Convex + Vite, gdy Convex jest skonfigurowany
 ```
 
@@ -154,7 +154,7 @@ pola nie wystarczy: bez „Re-run failed jobs” check zostaje czerwony.
 
 ### 4. Integracja: kolejka scalania i krótkie gałęzie
 
-- `main` ma **kolejkę scalania**: każdy PR jest testowany jeszcze raz na szczycie aktualnego `main`
+- Jeśli repo jest w organizacji i kolejka scalania jest włączona, `main` ma **kolejkę**: każdy PR jest testowany jeszcze raz na szczycie aktualnego `main`
   razem z PR-ami przed nim, więc dwa osobno zielone PR-y, które się gryzą, nie wejdą oba
   ([dokumentacja GitHub](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue)).
   Wymaga repozytorium w organizacji, patrz [CONTRIBUTING.md](../CONTRIBUTING.md).

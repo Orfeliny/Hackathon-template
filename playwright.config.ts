@@ -7,6 +7,12 @@ if (process.env.VITE_CONVEX_URL) {
   );
 }
 
+if (process.env.VITE_SENTRY_DSN) {
+  throw new Error(
+    "VITE_SENTRY_DSN is set in your shell; shell variables beat .env.e2e and would let the smoke test send events to Sentry. Unset it and retry.",
+  );
+}
+
 const { previewPort: port } = resolvePorts(process.cwd());
 const isCI = Boolean(process.env.CI);
 

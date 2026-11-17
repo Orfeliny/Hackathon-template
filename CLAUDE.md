@@ -76,7 +76,7 @@ say so instead of claiming it passed.
 ## Convex
 
 - Local backend without an account: `CONVEX_AGENT_MODE=anonymous npx convex dev --once`.
-  Lanes (`npm run lane:new`) need a logged-in Convex CLI.
+  Cloud lanes (`npm run lane:new`) need a logged-in Convex CLI; `--local` lanes do not.
 - After adding or removing a file under `convex/`, regenerate (`npx convex codegen` with a
   configured deployment) and run `npm run codegen:check`. `convex/_generated/` is committed.
   Such changes never run in parallel with other `convex/` file changes.

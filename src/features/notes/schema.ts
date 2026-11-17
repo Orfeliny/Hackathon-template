@@ -1,8 +1,6 @@
 import { z } from "zod";
 import { MAX_NOTE_LENGTH, MIN_NOTE_LENGTH } from "../../../convex/notes/limits";
 
-export { MAX_NOTE_LENGTH };
-
 export const noteFormSchema = z.object({
   text: z
     .string()

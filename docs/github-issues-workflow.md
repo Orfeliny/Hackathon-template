@@ -49,7 +49,7 @@ Jedno zadanie to jedno issue, jedna gałąź, jeden PR.
    gh issue comment 12 --body "PR #34 gotowy. verify zielony, kryteria 1-3 spełnione (testy w convex/login/)."
    ```
 
-Po zielonym checku `gate` i recenzji PR wchodzi przez kolejkę scalania (squash).
+Po zielonym checku `gate` i recenzji PR jest scalany squashem; jeśli repo jest w organizacji i kolejka scalania jest włączona, wchodzi przez kolejkę.
 
 ## Użyteczne komendy `gh`
 

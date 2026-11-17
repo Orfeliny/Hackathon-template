@@ -189,6 +189,7 @@ latest ES version, `rootDir` is the directory of the `tsconfig.json`, `types` is
 │  ├─ features/notes/          # feature.tsx (route + nav entry), components, hooks, schema, tests
 │  ├─ components/ui/           # a few primitives (Button, Card, Input) — no UI kit
 │  ├─ lib/env.ts               # Zod-validated import.meta.env
+│  ├─ lib/sentry.ts            # optional Sentry init, off without VITE_SENTRY_DSN
 │  └─ test/setup.ts
 ├─ e2e/smoke.spec.ts
 ├─ scripts/
@@ -200,7 +201,7 @@ latest ES version, `rootDir` is the directory of the `tsconfig.json`, `types` is
 ├─ docs/                       # Polish
 ├─ specs/                      # this file, the plan, and later team specs
 ├─ CLAUDE.md, SETUP_PROMPT.md, README.md, CONTRIBUTING.md, LICENSE (MIT)
-├─ .env.example, .env.e2e (committed, blanks VITE_CONVEX_URL for the e2e build, §8.4)
+├─ .env.example, .env.e2e (committed, blanks VITE_CONVEX_URL and VITE_SENTRY_DSN for the e2e build, §8.4)
 ├─ .gitattributes, .gitignore, .nvmrc, .npmrc, .prettierrc.json, .prettierignore
 ├─ eslint.config.js, vite.config.ts, vitest.config.ts, playwright.config.ts
 ├─ tsconfig.json, tsconfig.app.json, tsconfig.node.json
@@ -372,6 +373,7 @@ Never open a model port to the internet to make an integration work.
 | ------------------------------------- | ----------------------------------------------------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | Frontend (`.env.local`, Vercel build) | `VITE_CONVEX_URL`                                                                   | no                    | Convex deployment URL. `convex deploy --cmd … --cmd-url-env-var-name VITE_CONVEX_URL` sets it at build time [S17]. |
 | Frontend                              | `VITE_SENTRY_DSN`                                                                   | no (public by design) | Optional, task 30.                                                                                                 |
+| Frontend (build)                      | `VITE_COMMIT_SHA`                                                                   | no                    | Release id for Sentry, set by `deploy.yml`.                                                                        |
 | Local only                            | `CONVEX_DEPLOYMENT`                                                                 | no                    | Written to `.env.local` by `npx convex dev` [S17].                                                                 |
 | Convex env (per deployment)           | `AI_PROVIDER`                                                                       | no                    | `mock` (default) \| `openai-compatible`.                                                                           |
 | Convex env                            | `AI_BASE_URL`, `AI_MODEL`                                                           | no                    | Required when provider is `openai-compatible`.                                                                     |
@@ -380,6 +382,7 @@ Never open a model port to the internet to make an integration work.
 | GitHub secrets                        | `CONVEX_DEPLOY_KEY`                                                                 | **yes**               | Production deploy key [S5].                                                                                        |
 | GitHub secrets                        | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`                                | token yes             | Vercel CLI deploy [S18].                                                                                           |
 | GitHub secrets                        | `SENTRY_AUTH_TOKEN`                                                                 | **yes**               | Optional, source map upload.                                                                                       |
+| GitHub variables                      | `SENTRY_ORG`, `SENTRY_PROJECT`                                                      | no                    | Optional, source map upload; variables, not secrets.                                                               |
 
 - Frontend env is parsed by `src/lib/env.ts` (Zod). Missing `VITE_CONVEX_URL` is **not** an error:
   the app renders in "offline mode" with a banner; this keeps the e2e smoke test and first-run
@@ -426,7 +429,7 @@ The smoke test must give the same result on a laptop that has run `npx convex de
 shell variables beat all files [S30]. So:
 
 - The e2e bundle is built in its own mode: `vite build --mode e2e --outDir dist-e2e`. The committed
-  `.env.e2e` sets `VITE_CONVEX_URL=` (empty), which overrides `.env.local`; `src/lib/env.ts` treats
+  `.env.e2e` sets `VITE_CONVEX_URL=` and `VITE_SENTRY_DSN=` (empty), which override `.env.local`; `src/lib/env.ts` treats
   an empty value as unset. `dist-e2e/` is gitignored and excluded from lint/format.
 - Playwright's `webServer` runs that build and then
   `vite preview --mode e2e --outDir dist-e2e --port $PREVIEW_PORT --strictPort`.

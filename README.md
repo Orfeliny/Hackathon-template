@@ -53,7 +53,7 @@ CONVEX_AGENT_MODE=anonymous npx convex dev --once
 
 Komenda tworzy lokalny deployment i zapisuje `CONVEX_DEPLOYMENT` oraz `VITE_CONVEX_URL` w `.env.local`. Potem `npm run dev` uruchamia Convex i Vite razem. Dane demo załaduje `npm run seed`.
 
-**B. Konto Convex** (współdzielony deployment w chmurze, wymagany dla ścieżek z `npm run lane:new`):
+**B. Konto Convex** (współdzielony deployment w chmurze, wymagany dla ścieżek z `npm run lane:new` bez `--local`):
 
 ```bash
 npx convex login
@@ -72,18 +72,18 @@ npx convex env set AI_PROVIDER mock
 
 ## Komendy
 
-| Komenda                                                 | Co robi                                          |
-| ------------------------------------------------------- | ------------------------------------------------ |
-| `npm run dev`                                           | Convex + Vite razem (pełne środowisko)           |
-| `npm run dev:frontend`                                  | sam Vite, tryb offline                           |
-| `npm run seed`                                          | ładuje przykładowe notatki do Convex             |
-| `npm run build` / `npm run preview`                     | build produkcyjny i jego podgląd                 |
-| `npm run typecheck`, `npm run lint`, `npm run format`   | TypeScript, ESLint, Prettier                     |
-| `npm test`, `npm run test:coverage`, `npm run test:e2e` | testy jednostkowe, pokrycie, smoke Playwright    |
-| `npm run verify`                                        | pełny zestaw jak w CI (patrz niżej)              |
-| `npm run lane:new` / `lane:list` / `lane:rm`            | ścieżki pracy (git worktree + osobny deployment) |
-| `npm run overlap`                                       | pliki, które zmienia też inny PR lub ścieżka     |
-| `npm run codegen:check`                                 | sprawdza, czy `convex/_generated/` jest aktualny |
+| Komenda                                                 | Co robi                                                          |
+| ------------------------------------------------------- | ---------------------------------------------------------------- |
+| `npm run dev`                                           | Convex + Vite razem (pełne środowisko)                           |
+| `npm run dev:frontend`                                  | sam Vite (offline, dopóki `.env.local` nie ma `VITE_CONVEX_URL`) |
+| `npm run seed`                                          | ładuje przykładowe notatki do Convex                             |
+| `npm run build` / `npm run preview`                     | build produkcyjny i jego podgląd                                 |
+| `npm run typecheck`, `npm run lint`, `npm run format`   | TypeScript, ESLint, Prettier                                     |
+| `npm test`, `npm run test:coverage`, `npm run test:e2e` | testy jednostkowe, pokrycie, smoke Playwright                    |
+| `npm run verify`                                        | pełny zestaw jak w CI (patrz niżej)                              |
+| `npm run lane:new` / `lane:list` / `lane:rm`            | ścieżki pracy (git worktree + osobny deployment)                 |
+| `npm run overlap`                                       | pliki, które zmienia też inny PR lub ścieżka                     |
+| `npm run codegen:check`                                 | sprawdza, czy `convex/_generated/` jest aktualny                 |
 
 ## Struktura repozytorium
 
@@ -111,7 +111,7 @@ Każdy pracuje na osobnej ścieżce: własny worktree, własne porty i własny d
 ```bash
 npm run lane:new -- <osoba> <nr-issue> <slug>
 npm run lane:list
-npm run lane:rm -- <slug>
+npm run lane:rm -- <nr-issue>-<slug>
 ```
 
 CI blokuje PR, który miesza pliki wspólne z innymi, dopóki nie zaznaczysz w opisie PR pola `- [ ] Zmiana plików wspólnych uzgodniona z zespołem` i nie klikniesz „Re-run failed jobs”. Pełny opis, w tym limity darmowego planu Convex i konflikty: [docs/development-workflow.md](docs/development-workflow.md). Zasady zespołu: [CONTRIBUTING.md](CONTRIBUTING.md).
