@@ -59,7 +59,7 @@ const SENSITIVE_ASSIGNMENT = new RegExp(
 // errors where they start echoing the rejected value ("Value: ...").
 export function scrubText(input: string): string {
   const text = input.slice(0, MAX_INPUT);
-  const valueLine = text.search(/\r?\n\s*Value:/);
+  const valueLine = text.search(/\r?\n[ \t]*Value:/);
   const head = valueLine === -1 ? text : text.slice(0, valueLine);
   const scrubbed = head
     .replace(QUERY_PAIR_IN_TEXT, filterQueryPair)

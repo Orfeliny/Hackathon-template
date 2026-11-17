@@ -134,6 +134,12 @@ describe("hostile input", () => {
     expect(performance.now() - start).toBeLessThan(100);
   });
 
+  it("scrubText stays fast on a run of newlines", () => {
+    const start = performance.now();
+    scrubText(`${"\n".repeat(8192)}x`);
+    expect(performance.now() - start).toBeLessThan(10);
+  });
+
   it("drops the tail beyond the cap instead of passing it through", () => {
     const out = scrubText(`${"x".repeat(9000)} token=secret`);
     expect(out).toHaveLength(8192);
