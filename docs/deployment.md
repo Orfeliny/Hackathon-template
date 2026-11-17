@@ -26,7 +26,32 @@ Kroki workflow po sprawdzeniu sekretów:
 
 Sekrety trafiają tylko do kroków, które ich potrzebują (każdy krok ma własny blok `env`), a wersje narzędzi (`vercel@65.16.0`) i akcji są przypięte.
 
-## Lista na pierwsze wdrożenie
+## Szybka droga: `npm run setup:deploy`
+
+W repozytorium utworzonym z szablonu jedna komenda przygotowuje wdrożenia:
+
+```bash
+npm run setup:deploy -- --dry-run   # pokazuje plan, niczego nie zmienia
+npm run setup:deploy                # wykonuje
+npm run setup:deploy -- --protect   # dodatkowo ochrona main
+```
+
+Wcześniej zaloguj się w trzech narzędziach: `gh auth login`, `npx convex login` i `npx vercel@65.16.0 login`. Skrypt:
+
+1. sprawdza logowania i odmawia pracy na repozytorium-szablonie;
+2. tworzy projekt Convex (o ile `.env.local` nie ma jeszcze wdrożenia w chmurze) i produkcyjny klucz `CONVEX_DEPLOY_KEY`;
+3. łączy katalog z projektem Vercel (`vercel link`) i czyta `orgId` oraz `projectId`;
+4. prosi o token Vercel w ukrytym polu. Utworzysz go w vercel.com > Account Settings > Tokens. To jedyna wartość, którą wklejasz;
+5. tworzy środowisko `production` i wpisuje cztery sekrety przez stdin;
+6. z `--protect` zakłada ruleset dla `main` zgodny z sekcją „Ochrona gałęzi” niżej (bez `--protect` wypisuje tylko komendę).
+
+Klucze i token żyją wyłącznie w pamięci i trafiają do `gh secret set` przez stdin: nie ma ich w argumentach, logach, plikach ani komunikatach błędów. Każdy krok pomija się, jeśli jest już zrobiony, więc komendę można uruchomić ponownie. `--yes` wyłącza pytanie o potwierdzenie. Skrypt niczego nie wdraża: pierwszy deploy uruchomisz sam (`gh workflow run deploy.yml`, podgląd `gh run watch`). Zmienne backendu ustaw osobno, np. `npx convex env set AI_PROVIDER mock --prod`.
+
+Repozytorium-szablon nie ma sekretów i nie powinno ich mieć: jego job `deploy` kończy się zielono z komunikatem „Deploy skipped”. Sekrety dostaje dopiero kopia utworzona z szablonu. Ruleset z `--protect` wymaga repozytorium publicznego albo organizacji (ograniczenia w sekcji „Plany darmowe”); reguł na poziomie organizacji skrypt nie zakłada.
+
+Poniższa lista to ścieżka ręczna, na wypadek gdyby skrypt nie zadziałał.
+
+## Lista na pierwsze wdrożenie (ręcznie)
 
 ### 1. Convex: projekt produkcyjny i klucz
 
