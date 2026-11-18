@@ -26,7 +26,34 @@ Kroki workflow po sprawdzeniu sekretów:
 
 Sekrety trafiają tylko do kroków, które ich potrzebują (każdy krok ma własny blok `env`), a wersje narzędzi (`vercel@65.16.0`) i akcji są przypięte.
 
-## Lista na pierwsze wdrożenie
+## Szybka droga: `npm run setup:deploy`
+
+W repozytorium utworzonym z szablonu jedna komenda przygotowuje wdrożenia:
+
+```bash
+npm run setup:deploy -- --dry-run   # pokazuje plan, niczego nie zmienia
+npm run setup:deploy                # wykonuje
+npm run setup:deploy -- --protect   # dodatkowo ochrona main
+```
+
+Wcześniej zaloguj się w trzech narzędziach: `gh auth login`, `npx convex login` i `npx vercel@65.16.0 login`. Skrypt:
+
+1. sprawdza logowania i odmawia pracy na repozytorium-szablonie;
+2. tworzy projekt Convex (o ile `.env.local` nie ma jeszcze wdrożenia w chmurze) i produkcyjny klucz `CONVEX_DEPLOY_KEY`. Uwaga: `convex dev --once --configure new` nadpisuje `CONVEX_DEPLOYMENT` i `VITE_CONVEX_URL` w `.env.local`, więc lokalne `npm run dev` przestaje używać backendu lokalnego lub anonimowego i łączy się z nowym wdrożeniem deweloperskim w chmurze, a `npm run dev:frontend` przestaje działać offline z mockiem. Gdy `.env.local` wskazuje już projekt w chmurze o slugu innym niż nazwa repozytorium (slug nadaje serwer, więc może się różnić nawet w Twoim własnym projekcie), skrypt pyta, czy go użyć (przy `--yes`, `--dry-run` albo nieznanym slugu przerywa). Wdrożenia produkcyjnego Convex skrypt sam nie zakłada: jeśli `token create --prod` się nie powiedzie, utwórz je ręcznie (`npx convex deployment create --type prod --default` albo w panelu) i uruchom skrypt ponownie;
+3. tworzy projekt Vercel o nazwie repozytorium, jeśli go nie ma, łączy z nim katalog (`vercel link`; nieaktualny `.vercel/project.json` łączy ponownie) i czyta `orgId` oraz `projectId`;
+4. prosi o token Vercel w ukrytym polu. Utworzysz go w vercel.com > Account Settings > Tokens. To jedyna wartość, którą wklejasz;
+5. tworzy środowisko `production` i wpisuje cztery sekrety przez stdin;
+6. z `--protect` zakłada ruleset dla `main` zgodny z sekcją „Ochrona gałęzi” niżej (bez `--protect` wypisuje tylko komendę).
+
+Klucze i token żyją wyłącznie w pamięci i trafiają do `gh secret set` przez stdin: nie ma ich w argumentach, logach, plikach ani komunikatach błędów. Każdy krok pomija się, jeśli jest już zrobiony, więc komendę można uruchomić ponownie. `--yes` wyłącza pytanie o potwierdzenie, a przy niezgodnym projekcie Convex przerywa zamiast pytać. Skrypt niczego nie wdraża: pierwszy deploy uruchomisz sam (`gh workflow run deploy.yml`, podgląd `gh run watch`). Zmienne backendu ustaw osobno, np. `npx convex env set AI_PROVIDER mock --prod`.
+
+Skrypt zawsze używa środowiska `production`, a trybu z sekretami na poziomie repozytorium nie ma. Wymaga więc repozytorium publicznego albo płatnego planu (sekcja „Plany darmowe”). W prywatnym repozytorium na Free może zatrzymać się dopiero na zakładaniu środowiska, już po utworzeniu projektów Convex i Vercel. Wtedy dokończ ręcznie według listy niżej, z sekretami na poziomie repozytorium. Przerwany lub nieudany przebieg mógł zostawić niewykorzystany produkcyjny klucz wdrożeniowy Convex; możesz go unieważnić w panelu Convex.
+
+Repozytorium-szablon nie ma sekretów i nie powinno ich mieć: jego job `deploy` kończy się zielono z komunikatem „Deploy skipped”. Sekrety dostaje dopiero kopia utworzona z szablonu. Ruleset z `--protect` zawiera merge queue, a ta według sekcji „Plany darmowe” wymaga repozytorium należącego do organizacji. Strony GitHuba o kolejce nie podają tego wprost, więc na koncie osobistym `--protect` może się skończyć błędem 422 (skrypt podpowie wtedy ręczną konfigurację). Ruleset, który już obejmuje `main`, skrypt zostawia w spokoju; reguł na poziomie organizacji nie zakłada.
+
+Poniższa lista to ścieżka ręczna, na wypadek gdyby skrypt nie zadziałał.
+
+## Lista na pierwsze wdrożenie (ręcznie)
 
 ### 1. Convex: projekt produkcyjny i klucz
 

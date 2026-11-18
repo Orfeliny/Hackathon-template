@@ -4,6 +4,7 @@ Starter na 24-godzinny hackathon: Vite + React + TypeScript + Tailwind po stroni
 
 ## Spis treści
 
+- [Nowy hackathon z szablonu](#nowy-hackathon-z-szablonu)
 - [Wymagania](#wymagania)
 - [Szybki start (tryb offline)](#szybki-start-tryb-offline)
 - [Szybki start z Convex](#szybki-start-z-convex)
@@ -17,6 +18,16 @@ Starter na 24-godzinny hackathon: Vite + React + TypeScript + Tailwind po stroni
 - [Deploy](#deploy)
 - [Problemy](#problemy)
 - [Dokumentacja](#dokumentacja)
+
+## Nowy hackathon z szablonu
+
+To repozytorium jest szablonem GitHuba. Na każdy hackathon zakładasz własną kopię:
+
+1. Na stronie repozytorium kliknij **Use this template**, utwórz nowe repozytorium i sklonuj je.
+2. `npm ci`, potem `npm run dev:frontend`. Całość działa lokalnie z mockiem AI, bez żadnego konta.
+3. Gdy potrzebujesz publicznego adresu: `npm run setup:deploy`. Skrypt zakłada projekt Convex i Vercel, a cztery sekrety wdrożeniowe wpisuje do środowiska `production` w GitHubie. Zajmuje to kilka minut. Zanim ruszysz, zaloguj się: `gh auth login`, `npx convex login`, `npx vercel@65.16.0 login`. Sam szablon nigdy nie dostaje sekretów, więc skrypt się na nim zatrzyma.
+
+Podgląd planu bez zmian: `npm run setup:deploy -- --dry-run`. Szczegóły w [docs/deployment.md](docs/deployment.md).
 
 ## Wymagania
 
@@ -131,6 +142,8 @@ Reguły dla agentów (i ludzi) są w [CLAUDE.md](CLAUDE.md). Pierwszego dnia wkl
 ## Deploy
 
 Backend wdraża Convex, frontend Vercel, a oba kroki uruchamia workflow `.github/workflows/deploy.yml`. W `vercel.json` automatyczne wdrożenia z Gita są wyłączone, więc wdraża tylko workflow.
+
+Domyślna droga to `npm run setup:deploy` (opis w sekcji [Nowy hackathon z szablonu](#nowy-hackathon-z-szablonu)). Ręcznie:
 
 1. Zaimportuj repozytorium jako projekt w Vercel i wykonaj `vercel link`.
 2. Dodaj sekrety w środowisku `production` na GitHubie: `CONVEX_DEPLOY_KEY`, `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`. Bez nich workflow niczego nie wdroży i napisze, których brakuje.
